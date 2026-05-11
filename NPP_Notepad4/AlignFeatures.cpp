@@ -261,7 +261,9 @@ void ExecuteAlignLines(int nMode) {
 
     const Sci_Position iSelStart = ::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
     const Sci_Position iSelEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
-    const UINT cpEdit = CP_UTF8;
+    Sci_Position iCurPos = ::SendMessage(hSci, SCI_GETCURRENTPOS, 0, 0);
+    Sci_Position iAnchorPos = ::SendMessage(hSci, SCI_GETANCHOR, 0, 0);
+    const UINT cpEdit = (UINT)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
 
     const Sci_Position iLineStart = ::SendMessage(hSci, SCI_LINEFROMPOSITION, iSelStart, 0);
     Sci_Position iLineEnd = ::SendMessage(hSci, SCI_LINEFROMPOSITION, iSelEnd, 0);
@@ -535,6 +537,18 @@ void ExecuteAlignLines(int nMode) {
             }
         }
         ::SendMessage(hSci, SCI_ENDUNDOACTION, 0, 0);
+
+        if (iCurPos < iAnchorPos) {
+            iCurPos = iLineStart;
+            iAnchorPos = iLineEnd + 1;
+        }
+        else {
+            iAnchorPos = iLineStart;
+            iCurPos = iLineEnd + 1;
+        }
+        ::SendMessage(hSci, SCI_SETSEL,
+            ::SendMessage(hSci, SCI_POSITIONFROMLINE, iAnchorPos, 0),
+            ::SendMessage(hSci, SCI_POSITIONFROMLINE, iCurPos, 0));
     }
 }
 

@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="NPP_Notepad4/NPP_Notepad4.vcxproj" Id="2cd059d9-bdc1-4714-a1bf-e6f7fa0a5fa2" />
+</Solution>

@@ -108,7 +108,7 @@ static const MenuEntry g_menuTable[] = {
     { _T("Korean Han&ja to Hangul"), _T("한국어 한자를 한글로(&J)"), DoHanjaToHangul, MenuType::Item, nullptr },
     { _T("Korean Han&gul Decomposition"), _T("한글을 풀어쓰기로(&G)"), DoHangulDecomp, MenuType::Item, nullptr },
     { _T("Toggle Unicode Korean &Composition"), _T("유니코드 한글 풀어쓰기↔모아쓰기(&C)"), DoToggleComposition, MenuType::Item, nullptr },
-    { _T("&KSSM to Korean Wansung(Entire File)"), _T("조합형 한글을 완성형으로 (문서 전체)(&K)"), DoKssmToWansung, MenuType::Item, nullptr },
+    { _T("&KSSM to Korean Wansung (Entire File)"), _T("조합형 한글을 완성형으로 (문서 전체)(&K)"), DoKssmToWansung, MenuType::Item, nullptr },
 
     // [9] 서브 메뉴 헤더 2
     { _T("&Web Tools"),           _T("웹 개발도구(&W)"),      nullptr,       MenuType::SubHeader, &g_posWebTools },

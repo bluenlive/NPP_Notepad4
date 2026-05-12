@@ -198,6 +198,9 @@ void DoKssmToWansung() {
         ::SendMessage(hSci, SCI_ENDUNDOACTION, 0, 0);
     }
 
-    // [5] 읽기 전용 속성 원상 복구
-    if (wasReadOnly) ::SendMessage(hSci, SCI_SETREADONLY, TRUE, 0);
+    // [5] 읽기 전용 속성 원상 복구 및 수정 마크 제거
+    if (wasReadOnly) {
+        ::SendMessage(hSci, SCI_SETSAVEPOINT, 0, 0);
+        ::SendMessage(hSci, SCI_SETREADONLY, TRUE, 0);
+    }
 }

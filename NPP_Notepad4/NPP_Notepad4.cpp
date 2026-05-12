@@ -108,7 +108,7 @@ static const MenuEntry g_menuTable[] = {
     { _T("Korean Han&ja to Hangul"), _T("한국어 한자를 한글로(&J)"), DoHanjaToHangul, MenuType::Item, nullptr },
     { _T("Korean Han&gul Decomposition"), _T("한글을 풀어쓰기로(&G)"), DoHangulDecomp, MenuType::Item, nullptr },
     { _T("Toggle Unicode Korean &Composition"), _T("유니코드 한글 풀어쓰기↔모아쓰기(&C)"), DoToggleComposition, MenuType::Item, nullptr },
-    { _T("&KSSM to Korean Wansung"), _T("조합형 한글을 완성형으로(&K)"), DoKssmToWansung, MenuType::Item, nullptr },
+    { _T("&KSSM to Korean Wansung(Entire File)"), _T("조합형 한글을 완성형으로 (문서 전체)(&K)"), DoKssmToWansung, MenuType::Item, nullptr },
 
     // [9] 서브 메뉴 헤더 2
     { _T("&Web Tools"),           _T("웹 개발도구(&W)"),      nullptr,       MenuType::SubHeader, &g_posWebTools },
@@ -290,6 +290,14 @@ void UpdateMenuState() {
     int langType = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, (LPARAM)&langType);
 
+    // 1. Notepad++가 인지하는 인코딩 형식 확인용 (0: ANSI)
+    int nppEncoding = 0;
+    ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
+
+    // 2. Scintilla가 사용하는 실제 코드페이지 확인용 (949: Korean ANSI)
+    const int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+
+    const Sci_Position len = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
     const Sci_Position selStart = (Sci_Position)::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
     const Sci_Position selEnd = (Sci_Position)::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
     const bool hasSelection = (selStart != selEnd);
@@ -314,15 +322,22 @@ void UpdateMenuState() {
         ::EnableMenuItem(hMyMenu, funcItem[idx]._cmdID, MF_BYCOMMAND | (en ? MF_ENABLED : MF_GRAYED));
         };
 
-    setItem(0, isMultiLine);  setItem(2, hasSelection);
-    setItem(3, hasSelection); setItem(4, hasSelection); setItem(5, hasSelection);
-    setItem(6, hasSelection && ((int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0) != SC_CP_UTF8));
-    setItem(7, hasSelection);
-    setItem(8, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));
-    setItem(9, hasSelection && (langType != L_TEXT));
-    setItem(11, true);
+    setItem(0, isMultiLine);    // 좌우 정렬
+    setItem(2, hasSelection);   // 수식 계산
+    setItem(3, hasSelection);   // 한자->한글
+    setItem(4, hasSelection);   // 한글 풀어쓰기
+    setItem(5, hasSelection);   // 유니코드 한글 조합<->풀어쓰기
+    setItem(6, (nppEncoding == 0 && cp == 949 && len > 0)); // 조합형->완성형 (문서 전체)
+    setItem(7, hasSelection);   // JS 표현식 평가
+    setItem(8, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));    // HTML/XML 태그 삭제
+    setItem(9, hasSelection && (langType != L_TEXT));   // 주석 삭제 (HTML/C++/Py)
+    setItem(11, true);  // About
 
-    if (g_posTextTrans != -1) ::EnableMenuItem(hMyMenu, g_posTextTrans, MF_BYPOSITION | (hasSelection ? MF_ENABLED : MF_GRAYED));
+    if (g_posTextTrans != -1) {
+        const bool canKssm = (nppEncoding == 0 && cp == 949 && len > 0);
+        const bool isParentEnabled = hasSelection || canKssm;
+        ::EnableMenuItem(hMyMenu, g_posTextTrans, MF_BYPOSITION | (isParentEnabled ? MF_ENABLED : MF_GRAYED));
+    }
     if (g_posWebTools != -1)  ::EnableMenuItem(hMyMenu, g_posWebTools, MF_BYPOSITION | (hasSelection ? MF_ENABLED : MF_GRAYED));
 }
 

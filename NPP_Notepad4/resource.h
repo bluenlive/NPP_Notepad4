@@ -3,6 +3,7 @@
 // NPP_Notepad4.rc에서 사용되고 있습니다.
 //
 #define IDD_DIALOG_ABOUT                1000
+#define IDC_STATIC_DEBUG                1000
 #define IDI_ICON                        1001
 #define IDD_ALIGN                       1002
 #define IDC_ALIGN_LEFT                  1003
@@ -17,7 +18,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        1008
 #define _APS_NEXT_COMMAND_VALUE         32771
-#define _APS_NEXT_CONTROL_VALUE         1000
+#define _APS_NEXT_CONTROL_VALUE         1001
 #define _APS_NEXT_SYMED_VALUE           1000
 #endif
 #endif

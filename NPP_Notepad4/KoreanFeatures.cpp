@@ -101,15 +101,17 @@ void DoKssmToWansung() {
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
     HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
+    int nppEncoding = 0;
+    ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
+    const int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+    Sci_Position totalLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
+    if (nppEncoding != 0 || (cp != 0 && cp != 949) || totalLen <= 0) {
+        return;
+    }
+
     // [1] Read-only 강제 해제, 이 기능만 이렇게 동작함
     const bool wasReadOnly = (bool)::SendMessage(hSci, SCI_GETREADONLY, 0, 0);
     ::SendMessage(hSci, SCI_SETREADONLY, FALSE, 0);
-
-    Sci_Position totalLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
-    if (totalLen <= 0) {
-        if (wasReadOnly) ::SendMessage(hSci, SCI_SETREADONLY, TRUE, 0);
-        return;
-    }
 
     // [2] 상태 저장
     Sci_Position anchorPos = ::SendMessage(hSci, SCI_GETANCHOR, 0, 0);

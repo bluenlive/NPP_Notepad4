@@ -327,14 +327,14 @@ void UpdateMenuState() {
     setItem(3, hasSelection);   // 한자->한글
     setItem(4, hasSelection);   // 한글 풀어쓰기
     setItem(5, hasSelection);   // 유니코드 한글 조합<->풀어쓰기
-    setItem(6, (nppEncoding == 0 && cp == 949 && len > 0)); // 조합형->완성형 (문서 전체)
+    setItem(6, (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0)); // 조합형->완성형 (문서 전체)
     setItem(7, hasSelection);   // JS 표현식 평가
     setItem(8, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));    // HTML/XML 태그 삭제
     setItem(9, hasSelection && (langType != L_TEXT));   // 주석 삭제 (HTML/C++/Py)
     setItem(11, true);  // About
 
     if (g_posTextTrans != -1) {
-        const bool canKssm = (nppEncoding == 0 && cp == 949 && len > 0);
+        const bool canKssm = (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0);
         const bool isParentEnabled = hasSelection || canKssm;
         ::EnableMenuItem(hMyMenu, g_posTextTrans, MF_BYPOSITION | (isParentEnabled ? MF_ENABLED : MF_GRAYED));
     }
@@ -367,11 +367,15 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
     {
     case WM_INITDIALOG:
     {
-        // 0. 번역 적용
+        // 1. Ctrl+Alt 조합 시 IDC_STATIC_DEBUG에 디버그 정보 출력
+        bool isCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        bool isAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+
+        // 2. 번역 적용
         SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
         SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
 
-        // 1. 부모 창(Notepad++)과 내 창(About)의 좌표 정보를 가져옴
+        // 3. 부모 창(Notepad++)과 내 창(About)의 좌표 정보를 가져옴
         HWND hwndParent = GetParent(hwnd);
         if (hwndParent) {
             RECT rcParent, rcWindow;
@@ -390,6 +394,24 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
             // 3. 계산된 위치로 다이얼로그를 이동시킴
             SetWindowPos(hwnd, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
         }
+
+        if (isCtrl && isAlt) {
+            int whichView = 0;
+            ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
+            HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+
+            int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+            int nppEncoding = 0;
+            ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
+
+            TCHAR szDebug[128];
+            _stprintf_s(szDebug, _countof(szDebug), _T("Debug: CP[%d] / NPP_ENC[%d] / View[%d]"), cp, nppEncoding, whichView);
+            SetDlgItemText(hwnd, IDC_STATIC_DEBUG, szDebug);
+        }
+        else {
+            SetDlgItemText(hwnd, IDC_STATIC_DEBUG, _T(""));
+        }
+
         return (INT_PTR)TRUE;
     }
 

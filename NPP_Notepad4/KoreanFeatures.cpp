@@ -26,6 +26,10 @@
 #include "pch.h"
 #include "KoreanFeatures.h"
 #include "Common.h"
+#include <string>
+#include <string_view>
+#include <vector>
+//#include <windows.h>
 
 void DoHanjaToHangul()
 {
@@ -36,14 +40,201 @@ void DoHanjaToHangul()
     ::SendMessage(hSci, WM_IME_KEYDOWN, VK_HANJA, 0);
 }
 
+namespace {
+
+    //  콜백 함수 타입 정의: 날것의 문자열 뷰, 그리고 코드 페이지를 받음
+    typedef std::string(*TransformCallback)(std::string_view, UINT);
+
+    void DoCommonTransform(TransformCallback transformFunc) {
+        int whichView = 0;
+        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
+        HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+
+        UINT cpDoc = (UINT)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+        if (cpDoc == 0) cpDoc = ::GetACP();
+
+        int selCount = (int)::SendMessage(hSci, SCI_GETSELECTIONS, 0, 0);
+        bool isUndoOpened = false;
+        HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
+
+        for (int i = selCount - 1; i >= 0; --i) {
+            Sci_Position start = ::SendMessage(hSci, SCI_GETSELECTIONNSTART, i, 0);
+            Sci_Position end = ::SendMessage(hSci, SCI_GETSELECTIONNEND, i, 0);
+            if (start == end) continue;
+
+            std::string sRaw(end - start, '\0');
+            Sci_TextRangeFull tr = { {start, end}, sRaw.data() };
+            ::SendMessage(hSci, SCI_GETTEXTRANGEFULL, 0, (LPARAM)&tr);
+
+            // [B] 본체 호출: 이제 어떤 메뉴인지 묻지 않고 바로 실행합니다.
+            std::string sMapped = transformFunc(sRaw, cpDoc);
+
+            if (sMapped != sRaw) {
+                if (!isUndoOpened) {
+                    ::SendMessage(hSci, SCI_BEGINUNDOACTION, 0, 0);
+                    isUndoOpened = true;
+                }
+
+                // [최적화: 선택 영역 보정]
+                ::SendMessage(hSci, SCI_SETTARGETRANGE, start, end);
+                ::SendMessage(hSci, SCI_REPLACETARGET, sMapped.length(), (LPARAM)sMapped.c_str());
+
+                // 변환 후 영역 유지
+                ::SendMessage(hSci, SCI_SETSELECTIONNSTART, i, start);
+                ::SendMessage(hSci, SCI_SETSELECTIONNEND, i, start + (Sci_Position)sMapped.length());
+            }
+        }
+
+        if (isUndoOpened) ::SendMessage(hSci, SCI_ENDUNDOACTION, 0, 0);
+        ::SetCursor(hOldCursor);
+    }
+
+    // --- 인코딩/디코딩 헬퍼 함수 ---
+
+    std::wstring ConvertToWString(std::string_view s, UINT cp) {
+        if (s.empty()) return L"";
+        int len = ::MultiByteToWideChar(cp, 0, s.data(), (int)s.length(), NULL, 0);
+        std::wstring ws(len, L'\0');
+        ::MultiByteToWideChar(cp, 0, s.data(), (int)s.length(), ws.data(), len);
+        return ws;
+    }
+
+    std::string ConvertToString(std::wstring_view ws, UINT cp) {
+        if (ws.empty()) return "";
+        int len = ::WideCharToMultiByte(cp, 0, ws.data(), (int)ws.length(), NULL, 0, NULL, NULL);
+        std::string s(len, '\0');
+        ::WideCharToMultiByte(cp, 0, ws.data(), (int)ws.length(), s.data(), len, NULL, NULL);
+        return s;
+    }
+
+    std::string HangulDecomposeCore(std::string_view sRaw, UINT cpDoc) {
+
+        // 1. 초성 (19개)
+        static constexpr const wchar_t* kChoSplit[] = {
+            L"ㄱ", L"ㄲ", L"ㄴ", L"ㄷ", L"ㄸ", L"ㄹ", L"ㅁ", L"ㅂ", L"ㅃ", L"ㅅ", L"ㅆ", L"ㅇ", L"ㅈ", L"ㅉ", L"ㅊ", L"ㅋ", L"ㅌ", L"ㅍ", L"ㅎ"
+        };
+
+        // 2. 중성 (21개) - ㅘ, ㅞ 등 복합 모음 분리
+        static constexpr const wchar_t* kJungSplit[] = {
+            L"ㅏ", L"ㅐ", L"ㅑ", L"ㅒ", L"ㅓ", L"ㅔ", L"ㅕ", L"ㅖ", L"ㅗ", L"ㅗㅏ", L"ㅗㅐ", L"ㅗㅣ", L"ㅛ", L"ㅜ", L"ㅜㅓ", L"ㅜㅔ", L"ㅜㅣ", L"ㅠ", L"ㅡ", L"ㅡㅣ", L"ㅣ"
+        };
+
+        // 3. 종성 (28개) - ㄳ, ㄺ 등 복합 받침 분리
+        static constexpr const wchar_t* kJongSplit[] = {
+            L"", L"ㄱ", L"ㄲ", L"ㄱㅅ", L"ㄴ", L"ㄴㅈ", L"ㄴㅎ", L"ㄷ", L"ㄹ", L"ㄹㄱ", L"ㄹㅁ", L"ㄹㅂ", L"ㄹㅅ", L"ㄹㅌ", L"ㄹㅍ", L"ㄹㅎ", L"ㅁ", L"ㅂ", L"ㅂㅅ", L"ㅅ", L"ㅆ", L"ㅇ", L"ㅈ", L"ㅊ", L"ㅋ", L"ㅌ", L"ㅍ", L"ㅎ"
+        };
+
+        struct JamoMapping {
+            wchar_t key;
+            const wchar_t* value;
+        };
+
+        // 4. 한글 호환 자모 테이블 (U+3131 ~ U+318E)
+        static constexpr JamoMapping kDecompTable[] = {
+            // 복합 자음 (11개)
+            { 0x3133, L"ㄱㅅ" }, { 0x3135, L"ㄴㅈ" }, { 0x3136, L"ㄴㅎ" }, { 0x313A, L"ㄹㄱ" },
+            { 0x313B, L"ㄹㅁ" }, { 0x313C, L"ㄹㅂ" }, { 0x313D, L"ㄹㅅ" }, { 0x313E, L"ㄹㅌ" },
+            { 0x313F, L"ㄹㅍ" }, { 0x3140, L"ㄹㅎ" }, { 0x3144, L"ㅂㅅ" },
+
+            // 복합 모음 (7개)
+            { 0x3158, L"ㅗㅏ" }, { 0x3159, L"ㅗㅐ" }, { 0x315A, L"ㅗㅣ" }, // ㅘ, ㅙ, ㅚ
+            { 0x315D, L"ㅜㅓ" }, { 0x315E, L"ㅜㅔ" }, { 0x315F, L"ㅜㅣ" }, // ㅝ, ㅞ, ㅟ
+            { 0x3162, L"ㅡㅣ" }                                            // ㅢ
+        };
+
+        if (sRaw.empty()) return std::string(sRaw);
+
+        std::wstring wsText = ConvertToWString(sRaw, cpDoc);
+        std::wstring wsMapped;
+        wsMapped.reserve(wsText.length() * 5); // 뷁 -> ㅂㅜㅔㄹㄱ (5배까지 가능)
+
+        for (wchar_t w : wsText) {
+            // 1. 완성형 한글 (AC00 ~ D7A3)
+            if (w >= 0xAC00 && w <= 0xD7A3) {
+                const int c = w - 0xAC00;
+                wsMapped += kChoSplit[c / 588];
+                wsMapped += kJungSplit[(c % 588) / 28];
+                const int jong = c % 28;
+                if (jong > 0) wsMapped += kJongSplit[jong];
+            }
+            // 2. 호환 자모 중 분리 가능 범위 (ㄳ ~ ㅢ)
+            else if (w >= 0x3133 && w <= 0x3162) {
+                auto it = std::lower_bound(std::begin(kDecompTable), std::end(kDecompTable), w,
+                    [](const JamoMapping& m, wchar_t key) { return m.key < key; });
+
+                if (it != std::end(kDecompTable) && it->key == w) {
+                    wsMapped += it->value;
+                }
+                else {
+                    wsMapped += w;
+                }
+            }
+            // 3. 그 외 영역은 그대로 유지
+            else {
+                wsMapped += w;
+            }
+        }
+
+        return (wsMapped != wsText) ? ConvertToString(wsMapped, cpDoc) : std::string(sRaw);
+    }
+
+    std::string HangulToggleCore(std::string_view sRaw, UINT cpDoc) {
+        if (sRaw.empty()) return std::string(sRaw);
+
+        std::wstring wsText = ConvertToWString(sRaw, cpDoc);
+        std::wstring wsMapped;
+        wsMapped.reserve(wsText.length() * 3);
+
+        size_t s = 0;
+        while (s < wsText.length()) {
+            const wchar_t w0 = wsText[s];
+            const wchar_t w1 = (s + 1 < wsText.length()) ? wsText[s + 1] : 0;
+            const wchar_t w2 = (s + 2 < wsText.length()) ? wsText[s + 2] : 0;
+
+            // Notepad4에 구현해둔 토글 알고리즘
+            if (w0 >= 0xAC00 && w0 <= 0xD7A3) {
+                const wchar_t c = w0 - 0xAC00;
+                wsMapped += static_cast<wchar_t>(0x1100 + c / 588);
+                wsMapped += static_cast<wchar_t>(0x1161 + (c % 588) / 28);
+                wchar_t c3 = static_cast<wchar_t>(0x11A8 + c % 28 - 1);
+                if (c3 != 0x11A7) wsMapped += c3;
+                s++;
+            }
+            else if (w0 >= 0x1100 && w0 <= 0x1112) {
+                if (w1 >= 0x1161 && w1 <= 0x1175) {
+                    if (w2 >= 0x11A8 && w2 <= 0x11C2) {
+                        wsMapped += static_cast<wchar_t>(0xAC00 + (w0 - 0x1100) * 588 + (w1 - 0x1161) * 28 + (w2 - 0x11A8) + 1);
+                        s += 3;
+                    }
+                    else {
+                        wsMapped += static_cast<wchar_t>(0xAC00 + (w0 - 0x1100) * 588 + (w1 - 0x1161) * 28);
+                        s += 2;
+                    }
+                }
+                else {
+                    wsMapped += w0;
+                    s++;
+                }
+            }
+            else {
+                wsMapped += w0;
+                s++;
+            }
+        }
+
+        return (wsMapped != wsText) ? ConvertToString(wsMapped, cpDoc) : std::string(sRaw);
+    }
+
+}
+
 void DoHangulDecomp()
 {
-
+    DoCommonTransform(HangulDecomposeCore);
 }
 
 void DoToggleComposition()
 {
-
+    DoCommonTransform(HangulToggleCore);
 }
 
 namespace {

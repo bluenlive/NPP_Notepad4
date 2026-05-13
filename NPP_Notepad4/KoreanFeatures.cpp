@@ -29,7 +29,11 @@
 
 void DoHanjaToHangul()
 {
+    int whichView = 0;
+    ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
+    HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
+    ::SendMessage(hSci, WM_IME_KEYDOWN, VK_HANJA, 0);
 }
 
 void DoHangulDecomp()

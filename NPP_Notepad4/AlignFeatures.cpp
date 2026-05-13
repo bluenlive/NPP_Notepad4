@@ -90,6 +90,7 @@ INT_PTR CALLBACK AlignDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
 }
 
 namespace {
+
     // 폭 구하기
     struct interval {
         int first;
@@ -249,7 +250,7 @@ namespace {
 
 }
 
-// --- [NPP용 정렬 실행 함수] ---
+// --- [정렬 실행 함수] ---
 void ExecuteAlignLines(int nMode) {
     int whichView = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
@@ -257,7 +258,7 @@ void ExecuteAlignLines(int nMode) {
 
     if (::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0) != 0) return;
 
-#define BUFSIZE_ALIGN 1024
+    constexpr Sci_Position BUFSIZE_ALIGN = 1024;
 
     const Sci_Position iSelStart = ::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
     const Sci_Position iSelEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);

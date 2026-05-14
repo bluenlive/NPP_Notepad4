@@ -29,6 +29,7 @@
 #include "AlignFeatures.h"
 #include "Common.h"
 #include <algorithm>
+#include <span>
 #include <memory>
 
 static int g_alignMode = IDC_ALIGN_LEFT;
@@ -93,27 +94,20 @@ namespace {
 
     // 폭 구하기
     struct interval {
-        int first;
-        int last;
+        const int first;
+        const int last;
     };
 
     /* auxiliary function for binary search in interval table */
-    static constexpr int bisearch(const int ucs, const struct interval* table, int max) {
-        int min{ 0 };
-        int mid{ 0 };
-
-        if ((ucs < table[0].first) || (ucs > table[max].last))
+    static constexpr int bisearch(const int ucs, std::span<const interval> table) {
+        if (table.empty() || ucs < table.front().first || ucs > table.back().last)
             return 0;
-        while (max >= min) {
-            mid = (min + max) / 2;
-            if (ucs > table[mid].last)
-                min = mid + 1;
-            else if (ucs < table[mid].first)
-                max = mid - 1;
-            else
-                return 1;
-        }
 
+        auto it = std::ranges::lower_bound(table, ucs, {}, &interval::last);
+
+        if (it != table.end() && ucs >= it->first) {
+            return 1;
+        }
         return 0;
     }
 
@@ -221,16 +215,13 @@ namespace {
     };
 
     static constexpr Sci_Position GetConsoleWidth1CH(const int ucs) {
+        // 0. ASCII라면 바로 확인
+        if (!(ucs & ~0x7F)) [[likely]] return 1;
         // 1. 폭이 0인 문자 먼저 체크
-        if (bisearch(ucs, zeroWidthList,
-            sizeof(zeroWidthList) / sizeof(struct interval) - 1)) {
-            return 0;
-        }
+        if (bisearch(ucs, zeroWidthList)) [[unlikely]] return 0;
         // 2. 전각 문자 체크 (기존 리스트)
-        if (bisearch(ucs, doubleWidthList,
-            sizeof(doubleWidthList) / sizeof(struct interval) - 1)) {
-            return 2;
-        }
+        if (bisearch(ucs, doubleWidthList)) return 2;
+
         // 3. 나머지는 반각
         return 1;
     }

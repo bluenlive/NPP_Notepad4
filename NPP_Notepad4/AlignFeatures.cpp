@@ -99,16 +99,13 @@ namespace {
     };
 
     /* auxiliary function for binary search in interval table */
-    static constexpr int bisearch(const int ucs, std::span<const interval> table) {
+    static constexpr bool bisearch(const int ucs, std::span<const interval> table) {
         if (table.empty() || ucs < table.front().first || ucs > table.back().last)
-            return 0;
+            return false;
 
         auto it = std::ranges::lower_bound(table, ucs, {}, &interval::last);
 
-        if (it != table.end() && ucs >= it->first) {
-            return 1;
-        }
-        return 0;
+        return (it != table.end() && ucs >= it->first);
     }
 
     static constexpr struct interval doubleWidthList[]{

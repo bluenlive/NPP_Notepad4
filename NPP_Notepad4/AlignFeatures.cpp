@@ -132,7 +132,13 @@ namespace {
         { 0x02DD, 0x02DD }, { 0x02DF, 0x02DF }, { 0x0391, 0x03A1 },
         { 0x03A3, 0x03A9 }, { 0x03B1, 0x03C1 }, { 0x03C3, 0x03C9 },
         { 0x0401, 0x0401 }, { 0x0410, 0x044F }, { 0x0451, 0x0451 },
-        { 0x1100, 0x11FF }, { 0x2010, 0x2010 }, { 0x2013, 0x2016 },
+
+        // 한글 자모(U+1100) 중 폭 2를 가져야 하는 영역을 분리함
+        { 0x1100, 0x115F }, // 현대 초성 + 옛 초성 (0x1113..0x115F)
+        { 0x1161, 0x1175 }, // 현대 중성 (낱자로 찢어지므로 폭 2)
+        { 0x11A8, 0x11C2 }, // 현대 종성 (낱자로 찢어지므로 폭 2)
+
+        { 0x2010, 0x2010 }, { 0x2013, 0x2016 },
         { 0x2018, 0x2019 }, { 0x201C, 0x201D }, { 0x2020, 0x2022 },
         { 0x2024, 0x2027 }, { 0x2030, 0x2030 }, { 0x2032, 0x2033 },
         { 0x2035, 0x2035 }, { 0x203B, 0x203B }, { 0x203E, 0x203E },
@@ -158,10 +164,12 @@ namespace {
         { 0x25B2, 0x25B3 }, { 0x25B6, 0x25B7 }, { 0x25BC, 0x25BD },
         { 0x25C0, 0x25C1 }, { 0x25C6, 0x25C8 }, { 0x25CB, 0x25CB },
         { 0x25CE, 0x25D1 }, { 0x25E2, 0x25E5 }, { 0x25EF, 0x25EF },
-        { 0x2600, 0x27BF },	// 이모지 보조기호 하나로 통합
-        { 0x2E80, 0x303E },
-        { 0x3000, 0x303F }, // CJK 문장 부호 및 전각 공백
-        { 0x3040, 0xA4CF }, { 0xA700, 0xA7F5 }, { 0xAC00, 0xD7A3 },
+        { 0x2600, 0x27BF }, { 0x2E80, 0xA4CF }, { 0xA700, 0xA7F5 },
+
+        // 옛 초성 확장-A (폭 2)
+        { 0xA960, 0xA97F },
+
+        { 0xAC00, 0xD7A3 },
         { 0xF900, 0xFAFF }, { 0xFE10, 0xFE19 },
         { 0xFE30, 0xFE6F }, { 0xFF00, 0xFF60 }, { 0xFFE0, 0xFFE6 },
         { 0xFFFD, 0xFFFD },
@@ -175,54 +183,79 @@ namespace {
         { 0x1F300, 0x1F32C }, { 0x1F330, 0x1F37D }, { 0x1F380, 0x1F3CE },
         { 0x1F3D4, 0x1F3F7 }, { 0x1F400, 0x1F4FE }, { 0x1F500, 0x1F54B },
         { 0x1F550, 0x1F6CF },
-
-        { 0x1F6D0, 0x1F6ED }, // 추가된 수송 및 지도 기호
-        { 0x1F6F0, 0x1F6FC }, // 추가된 기호
+        { 0x1F6D0, 0x1F6ED },
+        { 0x1F6F0, 0x1F6FC },
 
         // U+1F700 부터 있는 보조 다국어 평면 중 전각 문자 #1
         { 0x1F700, 0x1F773 }, { 0x1F780, 0x1F7D4 },
-
-        { 0x1F7E0, 0x1F7EB }, // 유색 기하학적 도형 (Colored shapes)
+        { 0x1F7E0, 0x1F7EB },
 
         // U+1F700 부터 있는 보조 다국어 평면 중 전각 문자 #2
         { 0x1F800, 0x1F80B }, { 0x1F810, 0x1F847 },
         { 0x1F850, 0x1F859 }, { 0x1F860, 0x1F887 }, { 0x1F890, 0x1F8AD },
-
-        { 0x1F900, 0x1F9FF }, // Supplemental Symbols and Pictographs (에모지 대거 포함)
-        { 0x1FA00, 0x1FA6F }, // Chess Symbols 등
-        { 0x1FA70, 0x1FAFF }, // Symbols and Pictographs Extended-A
-        { 0x20000, 0x2FFFD }, // CJK Unified Ideographs Extension B-F
-        { 0x30000, 0x3FFFD }, // CJK Unified Ideographs Extension G-I (최신 한자)
-
-        { 0xF0000, 0xFFFFD }, { 0x100000, 0x10FFFD }
+        { 0x1F900, 0x1F9FF }, { 0x1FA00, 0x1FAFF }, { 0x20000, 0x3FFFD },
+        { 0xF0000, 0x10FFFD }
     };
 
     static constexpr struct interval zeroWidthList[]{
-        { 0x0000, 0x0008 }, // \t(09), \n(0A), \r(0D) 제외
-        { 0x000B, 0x000C },
-        { 0x000E, 0x001F },
-        { 0x007F, 0x009F }, { 0x0300, 0x036F },
+        // 0x00..0x08, 0x0B, 0x0C, 0x0E..0x1F, 0x7F 는 코드에서 선처리 (\t(09), \n(0A), \r(0D) 제외)
+        { 0x0080, 0x009F }, // C1 제어 문자 (0x7F 이하는 코드에서 선처리하므로 0x80부터 시작)
+        { 0x0300, 0x036F },
         { 0x0483, 0x0489 }, { 0x0591, 0x05BD }, { 0x05BF, 0x05BF },
         { 0x05C1, 0x05C2 }, { 0x05C4, 0x05C5 }, { 0x05C7, 0x05C7 },
         { 0x0610, 0x061A }, { 0x064B, 0x065F }, { 0x0670, 0x0670 },
         { 0x06D6, 0x06DC }, { 0x06DF, 0x06E4 }, { 0x06E7, 0x06E8 },
         { 0x06EA, 0x06ED },
+
+        // 옛한글 NFD 결합 문자 구간 (중성/종성)
+        { 0x1176, 0x11A7 }, // 옛 중성 (화면 결합용)
+        { 0x11C3, 0x11FF }, // 옛 종성 (화면 결합용)
+
         { 0x200B, 0x200F }, { 0x202A, 0x202E }, { 0x2060, 0x206F },
+
+        // 기호용 결합 다이아크리틱 마크 (수학 기호나 도형 위에 붙는 제로 너비 기호 무리)
+        { 0x20D0, 0x20FF },
+
+        // 옛한글 NFD 결합 문자 확장 블록
+        { 0xD7B0, 0xD7C6 }, // 확장-B 옛 중성
+        { 0xD7CB, 0xD7FB }, // 확장-B 옛 종성
+
         { 0xFE00, 0xFE0F }, { 0xFE20, 0xFE2F }, { 0xFEFF, 0xFEFF },
         { 0xFFF9, 0xFFFB }, { 0x1D167, 0x1D169 }, { 0x1D173, 0x1D182 },
         { 0x1D185, 0x1D18B }, { 0x1D1AA, 0x1D1AD }, { 0x1F3FB, 0x1F3FF },
+
+        // 유니코드 언어 태그 영역 (에모지 국가 코드 조합 등에 쓰이며 화면엔 안 보임)
+        { 0xE0000, 0xE007F },
         { 0xE0100, 0xE01EF }
     };
 
     static constexpr Sci_Position GetConsoleWidth1CH(const int ucs) {
-        // 0. ASCII라면 바로 확인
-        if (!(ucs & ~0x7F)) [[likely]] return 1;
-        // 1. 폭이 0인 문자 먼저 체크
+        // 1. ASCII 영역 (0x00 ~ 0x7F) 통합 Fast-path
+        // ucs의 7번 비트 이상이 모두 0인지 확인 (ucs < 0x80 과 동일)
+        if (!(ucs & ~0x7F)) [[likely]] {
+
+            // 1-1. ASCII 제어 문자 영역 (0x00 ~ 0x1F)
+            // ucs의 5번 비트 이상이 모두 0인지 확인 (ucs < 0x20 과 동일)
+            if (!(ucs & ~0x1F)) {
+                // \t(09), \n(0A), \r(0D)는 기본 폭(1) 유지
+                if (ucs == 0x09 || ucs == 0x0A || ucs == 0x0D) return 1;
+                return 0; // 그 외 제어 문자는 폭 0
+            }
+
+            // 1-2. DEL 문자 예외 처리
+            if (ucs == 0x7F) return 0;
+
+            // 1-3. 일반 출력 가능한 ASCII (0x20 ~ 0x7E)
+            return 1;
+        }
+
+        // 2. 폭이 0인 특수 문자/결합 문자 체크 (이진 탐색)
         if (bisearch(ucs, zeroWidthList)) [[unlikely]] return 0;
-        // 2. 전각 문자 체크 (기존 리스트)
+
+        // 3. 전각 문자 체크 (기존 리스트)
         if (bisearch(ucs, doubleWidthList)) return 2;
 
-        // 3. 나머지는 반각
+        // 4. 나머지는 일반 반각 문자
         return 1;
     }
 

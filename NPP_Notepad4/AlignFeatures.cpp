@@ -54,7 +54,7 @@ INT_PTR CALLBACK AlignDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
         CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, g_alignMode);
 
         // 3. 부모 창(Notepad++) 중앙 정렬 로직 (이전에 만든 것과 동일)
-        HWND hwndParent = GetParent(hwnd);
+        const HWND hwndParent = GetParent(hwnd);
         if (hwndParent) {
             RECT rcP, rcD;
             GetWindowRect(hwndParent, &rcP);
@@ -103,7 +103,7 @@ namespace {
         if (table.empty() || ucs < table.front().first || ucs > table.back().last)
             return false;
 
-        auto it = std::ranges::lower_bound(table, ucs, {}, &interval::last);
+        const auto it = std::ranges::lower_bound(table, ucs, {}, &interval::last);
 
         return (it != table.end() && ucs >= it->first);
     }
@@ -272,10 +272,10 @@ namespace {
 }
 
 // --- [정렬 실행 함수] ---
-void ExecuteAlignLines(int nMode) {
+void ExecuteAlignLines(const int nMode) {
     int whichView = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
-    HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+    const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
     if (::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0) != 0) return;
 
@@ -292,7 +292,7 @@ void ExecuteAlignLines(int nMode) {
 
     if (iSelEnd <= ::SendMessage(hSci, SCI_POSITIONFROMLINE, iLineEnd, 0)) {
         if (iLineEnd - iLineStart >= 1)
-            iLineEnd--;
+            --iLineEnd;
     }
 
     Sci_Position iMinIndent = BUFSIZE_ALIGN;
@@ -305,7 +305,7 @@ void ExecuteAlignLines(int nMode) {
 
         if (iLineIndentPos < iLineEndPos) {
             while (iLineEndPos >= iLineIndentPos) {
-                iLineEndPos--;
+                --iLineEndPos;
                 const int ch = (int)::SendMessage(hSci, SCI_GETCHARAT, iLineEndPos, 0);
                 if (ch != ' ' && ch != '\t') {
                     break;
@@ -389,7 +389,7 @@ void ExecuteAlignLines(int nMode) {
                     // 2. 앞쪽 공백 제거 및 데이터 시프트
                     LPWSTR pStart = pBuf;
                     while (*pStart && wcschr(L"\r\n\t ", *pStart)) {
-                        pStart++;
+                        ++pStart;
                     }
 
                     if (pStart != pBuf) {
@@ -404,7 +404,7 @@ void ExecuteAlignLines(int nMode) {
                         const WCHAR uc = *p;
                         if (!IsSurrogate(uc)) {
                             iWordsLength += GetConsoleWidth1CH((int)uc);
-                            var->pWords[iWords++] = p++;
+                            var->pWords[iWords++] = ++p;
                         }
                         else {
                             const WCHAR uc2{ p[1] };
@@ -417,7 +417,7 @@ void ExecuteAlignLines(int nMode) {
                                 // ERROR 발생, 응급조치
                                 // iWordsLength는 정확성이 없는 값임
                                 iWordsLength += GetConsoleWidth1CH((int)uc);
-                                var->pWords[iWords++] = p++;
+                                var->pWords[iWords++] = ++p;
                             }
                         }
                         while (*p && *p != L' ' && *p != L'\t') {
@@ -450,7 +450,7 @@ void ExecuteAlignLines(int nMode) {
                     if (nMode == IDC_ALIGN_JUSTIFY || nMode == IDC_ALIGN_JUSTIFY_PAR) {
                         bool bNextLineIsBlank = false;
                         if (nMode == IDC_ALIGN_JUSTIFY_PAR) {
-                            Sci_Position lineCount = (Sci_Position)::SendMessage(hSci, SCI_GETLINECOUNT, 0, 0);
+                            const Sci_Position lineCount = (Sci_Position)::SendMessage(hSci, SCI_GETLINECOUNT, 0, 0);
                             if (lineCount <= iLine + 1) {
                                 bNextLineIsBlank = true;
                             }
@@ -533,7 +533,7 @@ void ExecuteAlignLines(int nMode) {
                             // 가운데 정렬 시 홀수 공백 보정
                             if (nMode == IDC_ALIGN_CENTER && iWords > 1 && iOddSpaces > 0 && i + 1 >= iWords / 2) {
                                 lstrcat(p, L" ");
-                                iOddSpaces--;
+                                --iOddSpaces;
                             }
                             p += wcslen(p);
                         }

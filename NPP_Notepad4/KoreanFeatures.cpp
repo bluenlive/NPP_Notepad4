@@ -45,21 +45,21 @@ namespace {
     //  콜백 함수 타입 정의: 날것의 문자열 뷰, 그리고 코드 페이지를 받음
     typedef std::string(*TransformCallback)(std::string_view, UINT);
 
-    void DoCommonTransform(TransformCallback transformFunc) {
+    void DoCommonTransform(const TransformCallback transformFunc) {
         int whichView = 0;
         ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
-        HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+        const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
         UINT cpDoc = (UINT)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
         if (cpDoc == 0) cpDoc = ::GetACP();
 
-        int selCount = (int)::SendMessage(hSci, SCI_GETSELECTIONS, 0, 0);
+        const int selCount = (int)::SendMessage(hSci, SCI_GETSELECTIONS, 0, 0);
         bool isUndoOpened = false;
-        HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
+        const HCURSOR hOldCursor = ::SetCursor(::LoadCursor(NULL, IDC_WAIT));
 
         for (int i = selCount - 1; i >= 0; --i) {
-            Sci_Position start = ::SendMessage(hSci, SCI_GETSELECTIONNSTART, i, 0);
-            Sci_Position end = ::SendMessage(hSci, SCI_GETSELECTIONNEND, i, 0);
+            const Sci_Position start = ::SendMessage(hSci, SCI_GETSELECTIONNSTART, i, 0);
+            const Sci_Position end = ::SendMessage(hSci, SCI_GETSELECTIONNEND, i, 0);
             if (start == end) continue;
 
             std::string sRaw(end - start, '\0');
@@ -67,7 +67,7 @@ namespace {
             ::SendMessage(hSci, SCI_GETTEXTRANGEFULL, 0, (LPARAM)&tr);
 
             // [B] 본체 호출: 이제 어떤 메뉴인지 묻지 않고 바로 실행합니다.
-            std::string sMapped = transformFunc(sRaw, cpDoc);
+            const std::string sMapped = transformFunc(sRaw, cpDoc);
 
             if (sMapped != sRaw) {
                 if (!isUndoOpened) {
@@ -125,7 +125,7 @@ namespace {
         };
 
         struct JamoMapping {
-            wchar_t key;
+            const wchar_t key;
             const wchar_t* value;
         };
 
@@ -144,7 +144,7 @@ namespace {
 
         if (sRaw.empty()) return std::string(sRaw);
 
-        std::wstring wsText = ConvertToWString(sRaw, cpDoc);
+        const std::wstring wsText = ConvertToWString(sRaw, cpDoc);
         std::wstring wsMapped;
         wsMapped.reserve(wsText.length() * 5); // 뷁 -> ㅂㅜㅔㄹㄱ (5배까지 가능)
 
@@ -178,10 +178,10 @@ namespace {
         return (wsMapped != wsText) ? ConvertToString(wsMapped, cpDoc) : std::string(sRaw);
     }
 
-    std::string HangulToggleCore(std::string_view sRaw, UINT cpDoc) {
+    std::string HangulToggleCore(std::string_view sRaw, const UINT cpDoc) {
         if (sRaw.empty()) return std::string(sRaw);
 
-        std::wstring wsText = ConvertToWString(sRaw, cpDoc);
+        const std::wstring wsText = ConvertToWString(sRaw, cpDoc);
         std::wstring wsMapped;
         wsMapped.reserve(wsText.length() * 3);
 
@@ -198,7 +198,7 @@ namespace {
                 wsMapped += static_cast<wchar_t>(0x1161 + (c % 588) / 28);
                 wchar_t c3 = static_cast<wchar_t>(0x11A8 + c % 28 - 1);
                 if (c3 != 0x11A7) wsMapped += c3;
-                s++;
+                ++s;
             }
             else if (w0 >= 0x1100 && w0 <= 0x1112) {
                 if (w1 >= 0x1161 && w1 <= 0x1175) {
@@ -213,12 +213,12 @@ namespace {
                 }
                 else {
                     wsMapped += w0;
-                    s++;
+                    ++s;
                 }
             }
             else {
                 wsMapped += w0;
-                s++;
+                ++s;
             }
         }
 
@@ -240,7 +240,7 @@ void DoToggleComposition()
 namespace {
 
     // 조합형 초성 값(2~20) -> [유니코드 음절 인덱스, 호환 자모 코드]
-    static const int chosung_table[32][2] = {
+    static constexpr int chosung_table[32][2] = {
         { -1, 0x0000 }, { -1, 0x0000 },                 // 0, 1 (1은 채움)
         { 0,  0x3131 }, { 1,  0x3132 }, { 2,  0x3134 }, // 2:ㄱ, 3:ㄲ, 4:ㄴ
         { 3,  0x3137 }, { 4,  0x3138 }, { 5,  0x3139 }, // 5:ㄷ, 6:ㄸ, 7:ㄹ
@@ -255,7 +255,7 @@ namespace {
     };
 
     // 조합형 중성 값(3~26) -> [유니코드 음절 인덱스, 호환 자모 코드]
-    static const int jungsung_table[32][2] = {
+    static constexpr int jungsung_table[32][2] = {
         { -1, 0x0000 }, { -1, 0x0000 }, { -1, 0x0000 }, // 0, 1, 2 (2는 채움)
         { 0,  0x314F }, { 1,  0x3150 }, { 2,  0x3151 }, // 3:ㅏ, 4:ㅐ, 5:ㅑ
         { 3,  0x3152 }, { 4,  0x3153 },                 // 6:ㅒ, 7:ㅓ
@@ -272,7 +272,7 @@ namespace {
     };
 
     // 조합형 종성 값(2~29) -> [유니코드 음절 인덱스, 호환 자모 코드]
-    static const int jongsung_table[32][2] = {
+    static constexpr int jongsung_table[32][2] = {
         { -1, 0x0000 },                                 // 0
         { 0,  0x0000 },                                 // 1 (채움)
         { 1,  0x3131 }, { 2,  0x3132 }, { 3,  0x3133 }, // 2:ㄱ, 3:ㄲ, 4:ㄳ
@@ -294,12 +294,12 @@ namespace {
 void DoKssmToWansung() {
     int whichView = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
-    HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+    const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
     int nppEncoding = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
     const int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
-    Sci_Position totalLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
+    const Sci_Position totalLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
     if (nppEncoding != 0 || (cp != 0 && cp != 949) || totalLen <= 0) {
         return;
     }
@@ -309,9 +309,9 @@ void DoKssmToWansung() {
     ::SendMessage(hSci, SCI_SETREADONLY, FALSE, 0);
 
     // [2] 상태 저장
-    Sci_Position anchorPos = ::SendMessage(hSci, SCI_GETANCHOR, 0, 0);
-    Sci_Position caretPos = ::SendMessage(hSci, SCI_GETCURRENTPOS, 0, 0);
-    Sci_Position firstLine = ::SendMessage(hSci, SCI_GETFIRSTVISIBLELINE, 0, 0);
+    const Sci_Position anchorPos = ::SendMessage(hSci, SCI_GETANCHOR, 0, 0);
+    const Sci_Position caretPos = ::SendMessage(hSci, SCI_GETCURRENTPOS, 0, 0);
+    const Sci_Position firstLine = ::SendMessage(hSci, SCI_GETFIRSTVISIBLELINE, 0, 0);
     Sci_Position anchorShift = 0, caretShift = 0;
 
     std::vector<char> src(totalLen + 1);
@@ -323,26 +323,26 @@ void DoKssmToWansung() {
     // [3] 변환 루프
     const unsigned char* pSrc = reinterpret_cast<const unsigned char*>(src.data());
     for (Sci_Position i = 0; i < totalLen; ) {
-        unsigned char b1 = pSrc[i];
-        size_t prevWSize = wResult.size();
+        const unsigned char b1 = pSrc[i];
+        const size_t prevWSize = wResult.size();
 
         if (!(b1 & 0x80)) { // ASCII
             wResult.push_back(static_cast<wchar_t>(b1));
-            i++;
+            ++i;
         }
         else if (i + 1 < totalLen) { // KSSM (Johab)
             unsigned char b2 = pSrc[i + 1];
 
             // 추억의 비트 구조: 1 CCCCC JJ | JJJ TTTTT
-            int cho = (b1 >> 2) & 0x1F;
-            int jung = ((b1 & 0x03) << 3) | (b2 >> 5);
-            int jong = b2 & 0x1F;
+            const int cho = (b1 >> 2) & 0x1F;
+            const int jung = ((b1 & 0x03) << 3) | (b2 >> 5);
+            const int jong = b2 & 0x1F;
 
             bool converted = false;
             if (cho >= 2 && cho <= 20 && jung >= 3 && jung <= 29) {
-                int cIdx = chosung_table[cho][0];
-                int mIdx = jungsung_table[jung][0];
-                int tIdx = (jong >= 1 && jong <= 29) ? jongsung_table[jong][0] : 0;
+                const int cIdx = chosung_table[cho][0];
+                const int mIdx = jungsung_table[jung][0];
+                const int tIdx = (jong >= 1 && jong <= 29) ? jongsung_table[jong][0] : 0;
 
                 if (cIdx != -1 && mIdx != -1) {
                     wResult.push_back(static_cast<wchar_t>(0xAC00 + (cIdx * 588) + (mIdx * 28) + (tIdx > 0 ? tIdx : 0)));
@@ -369,7 +369,7 @@ void DoKssmToWansung() {
 
             i += 2;
         }
-        else { i++; }
+        else { ++i; }
     }
 
     // [4] 결과 적용
@@ -384,7 +384,7 @@ void DoKssmToWansung() {
         ::SendMessage(hSci, SCI_REPLACETARGET, -1, (LPARAM)ansiResult.data());
 
         // 위치 복원
-        Sci_Position newMaxLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
+        const Sci_Position newMaxLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
         Sci_Position newAnchor = anchorPos + anchorShift;
         Sci_Position newCaret = caretPos + caretShift;
         if (newAnchor > newMaxLen) newAnchor = newMaxLen;

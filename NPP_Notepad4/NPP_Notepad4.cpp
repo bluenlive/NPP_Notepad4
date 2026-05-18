@@ -305,6 +305,10 @@ void UpdateMenuState() {
     const Sci_Position endLine = (Sci_Position)::SendMessage(hSci, SCI_LINEFROMPOSITION, selEnd, 0);
     const bool isMultiLine = hasSelection && (endLine > startLine);
 
+    // SC_SEL_RECTANGLE: 기본 컬럼 블록, SC_SEL_THIN: Alt+Shift 조합으로 만든 폭이 없는 컬럼 블록
+    const int selMode = (int)::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0);
+    const bool isColumnSelection = (selMode == SC_SEL_RECTANGLE || selMode == SC_SEL_THIN);
+
     const HMENU hPluginsMenu = (HMENU)::SendMessage(nppData._nppHandle, NPPM_GETMENUHANDLE, NPPPLUGINMENU, 0);
     if (!hPluginsMenu) return;
 
@@ -323,12 +327,12 @@ void UpdateMenuState() {
         };
 
     setItem(0, isMultiLine);    // 좌우 정렬
-    setItem(2, hasSelection);   // 수식 계산
+    setItem(2, hasSelection && !isColumnSelection);   // 수식 계산
     setItem(3, hasSelection);   // 한자->한글
     setItem(4, hasSelection);   // 한글 풀어쓰기
     setItem(5, hasSelection);   // 유니코드 한글 조합<->풀어쓰기
     setItem(6, (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0)); // 조합형->완성형 (문서 전체)
-    setItem(7, hasSelection);   // JS 표현식 평가
+    setItem(7, hasSelection && !isColumnSelection);   // JS 표현식 평가
     setItem(8, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));    // HTML/XML 태그 삭제
     setItem(9, hasSelection && (langType != L_TEXT));   // 주석 삭제 (HTML/C++/Py)
     setItem(11, true);  // About

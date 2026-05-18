@@ -24,22 +24,240 @@
 
 
 #include "pch.h"
+#include <windows.h>
+#include <shlwapi.h>
+#include <propvarutil.h>
+#include <activscp.h>
 #include "ToolFeatures.h"
 #include "Common.h"
 #include <vector>
 #include <string>
+#include <algorithm>
 
 extern NppData nppData;
 extern int g_cachedLangType; // NPPN_LANGCHANGED 등에서 캐싱된 언어 타입
 
+namespace {
+
+    enum class MenuType { Calculate, EvaluateJS };
+
+    static constexpr GUID CLSID_Chakra = // {1b7cd997-e5ff-4932-a7a6-2a9e636da385}
+    { 0x1b7cd997, 0xe5ff, 0x4932, { 0xa7, 0xa6, 0x2a, 0x9e, 0x63, 0x6d, 0xa3, 0x85 } };
+
+    struct CalcContext final : IActiveScriptSite {
+        HWND hSci = nullptr;      // NPP Scintilla 핸들, Notepad4 에서는 사용하지 않음
+        LPSTR pszText = nullptr;
+        size_t textLength = 0;
+        UINT cpEdit = 0;
+        ULONG lineStart = 0;
+
+        // IUnknown
+        STDMETHODIMP QueryInterface(REFIID riid, PVOID* ppv) noexcept override {
+            if (riid == IID_IUnknown || riid == IID_IActiveScriptSite) {
+                *ppv = this;
+                AddRef();
+                return S_OK;
+            }
+            *ppv = nullptr;
+            return E_NOINTERFACE;
+        }
+        STDMETHODIMP_(ULONG) AddRef() noexcept override {
+            return 1;
+        }
+        STDMETHODIMP_(ULONG) Release() noexcept override {
+            return 1;
+        }
+
+        // IActiveScriptSite
+        STDMETHODIMP GetLCID(LCID* lcid) noexcept override {
+            *lcid = LOCALE_USER_DEFAULT;
+            return S_OK;
+        }
+        STDMETHODIMP GetDocVersionString(BSTR* ver) noexcept override {
+            *ver = nullptr;
+            return S_OK;
+        }
+        STDMETHODIMP OnScriptTerminate(const VARIANT* /*result*/, const EXCEPINFO* /*excepInfo*/) noexcept override {
+            return S_OK;
+        }
+        STDMETHODIMP OnStateChange(SCRIPTSTATE /*scriptState*/) noexcept override {
+            return S_OK;
+        }
+        STDMETHODIMP OnEnterScript() noexcept override {
+            return S_OK;
+        }
+        STDMETHODIMP OnLeaveScript() noexcept override {
+            return S_OK;
+        }
+        STDMETHODIMP GetItemInfo(const WCHAR* /*strName*/, DWORD /*dwReturnMask*/, IUnknown** /*ppItem*/, ITypeInfo** /*ppti*/) noexcept override {
+            return S_OK;
+        }
+        STDMETHODIMP OnScriptError(IActiveScriptError* scriptError) override {
+            EXCEPINFO excepInfo{};
+            const HRESULT hr = scriptError->GetExceptionInfo(&excepInfo);
+            if (SUCCEEDED(hr) && excepInfo.bstrDescription) {
+                ::WideCharToMultiByte(cpEdit, 0, excepInfo.bstrDescription, -1, pszText, static_cast<int>(textLength), nullptr, nullptr);
+                ULONG line = 0;
+                LONG column = 0;
+                scriptError->GetSourcePosition(nullptr, &line, &column);
+
+                Sci_Position iSelStart = ::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
+                if (line > lineStart) {
+                    iSelStart = ::SendMessage(hSci, SCI_LINEFROMPOSITION, iSelStart, 0) + line - lineStart;
+                    iSelStart = ::SendMessage(hSci, SCI_POSITIONFROMLINE, iSelStart, 0);
+                }
+                iSelStart += column;
+
+                ::SendMessage(hSci, SCI_CALLTIPSHOW, iSelStart, reinterpret_cast<LPARAM>(pszText));
+            }
+            return S_OK;
+        }
+    };
+
+    void EditCalculateExpr(MenuType menu) {
+        int currentEdit = 0;
+        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTSCINTILLA, 0, reinterpret_cast<LPARAM>(&currentEdit));
+        const HWND hSci = (currentEdit == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+
+        if (!hSci) {
+            return;
+        }
+
+        const Sci_Position selStart = ::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
+        const Sci_Position selEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
+        Sci_Position iSelCount = selEnd - selStart;
+
+        if (iSelCount <= 0) {
+            return;
+        }
+
+        using VariantToStringSig = HRESULT(WINAPI*)(REFVARIANT varIn, PWSTR pszBuf, UINT cchBuf);
+        static VariantToStringSig pfnVariantToString = nullptr;
+        static uint8_t triedLoadingPropSys = 0;
+        static HMODULE hPropSysDLL = nullptr;
+        if (triedLoadingPropSys == 0) {
+            triedLoadingPropSys = 1;
+            const HMODULE hDLL = ::LoadLibraryExW(L"propsys.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+            if (hDLL) {
+                pfnVariantToString = reinterpret_cast<VariantToStringSig>(::GetProcAddress(hDLL, "VariantToString"));
+                if (pfnVariantToString == nullptr) {
+                    ::FreeLibrary(hDLL);
+                    return;
+                }
+                triedLoadingPropSys = 2;
+                hPropSysDLL = hDLL;
+            }
+        }
+        if (triedLoadingPropSys != 2) {
+            return;
+        }
+
+        IActiveScript* activeScript = nullptr;
+        HRESULT hr = ::CoCreateInstance(CLSID_Chakra, nullptr, CLSCTX_INPROC_SERVER, IID_IActiveScript, reinterpret_cast<void**>(&activeScript));
+        if (!SUCCEEDED(hr)) {
+            CLSID clsidScript;
+            hr = CLSIDFromProgID(L"JavaScript", &clsidScript);
+            if (SUCCEEDED(hr)) {
+                hr = ::CoCreateInstance(clsidScript, nullptr, CLSCTX_INPROC_SERVER, IID_IActiveScript, reinterpret_cast<void**>(&activeScript));
+            }
+            if (!SUCCEEDED(hr)) {
+                return;
+            }
+        }
+
+        constexpr size_t padding = 1024; // for CMD_CALCULATE_EXPR
+        iSelCount = (iSelCount + 1 + MEMORY_ALLOCATION_ALIGNMENT - 1) & ~(MEMORY_ALLOCATION_ALIGNMENT - 1);
+        iSelCount = std::max<Sci_Position>(iSelCount, 1024); // increased to store result and error message
+
+        CalcContext context;
+        context.hSci = hSci;    // Notepad4에서는 사용하지 않음
+        context.textLength = (iSelCount * (sizeof(char) + sizeof(WCHAR) * 2)) + (padding * sizeof(WCHAR));
+        context.lineStart = 0;
+
+        context.pszText = static_cast<char*>(::HeapAlloc(::GetProcessHeap(), HEAP_ZERO_MEMORY, context.textLength));
+        if (!context.pszText) {
+            activeScript->Release();
+            return;
+        }
+        context.cpEdit = static_cast<int>(::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0));
+
+        hr = activeScript->SetScriptSite(&context);
+        if (SUCCEEDED(hr)) {
+            IActiveScriptParse* scriptParse = nullptr;
+            hr = activeScript->QueryInterface(IID_IActiveScriptParse, reinterpret_cast<void**>(&scriptParse));
+            if (SUCCEEDED(hr)) {
+                hr = scriptParse->InitNew();
+                if (SUCCEEDED(hr)) {
+                    VARIANT result;
+                    VariantInit(&result);
+
+                    char* const pszText = context.pszText;
+                    WCHAR* const pszTextW = reinterpret_cast<LPWSTR>(pszText + iSelCount);
+
+                    ::SendMessage(hSci, SCI_GETSELTEXT, 0, reinterpret_cast<LPARAM>(pszText));
+                    ::MultiByteToWideChar(context.cpEdit, 0, pszText, -1, pszTextW, static_cast<int>(iSelCount));
+
+                    LPWSTR pszBuf = pszTextW;
+                    if (menu == MenuType::Calculate) {
+                        context.lineStart = 1;
+                        pszBuf += iSelCount;
+                        // Use with(Math) to avoid writing it everywhere.
+                        wsprintf(pszBuf, L"with(Math){\n%s}", pszTextW);
+                        // regex replace() to support pow operator ^
+                        /*wsprintf(pszBuf,
+                            L"(function(s){"
+                            L"var str = s.replace(/([\\d.]+)\\s*\\^\\s*([\\d.]+)/g, 'pow($1,$2)');"
+                            L"with(Math){return eval(str);}"
+                            L"})('%s')", pszTextW);*/
+                    }
+                    #pragma warning(suppress: 6387)
+                    hr = scriptParse->ParseScriptText(pszBuf, nullptr, nullptr, nullptr, 0, 0, SCRIPTTEXT_ISEXPRESSION, &result, nullptr);
+                    if (SUCCEEDED(hr)) {
+                        if (result.vt == VT_DISPATCH) { // call result object's toString() method
+                            IDispatch* const dispatch = result.pdispVal;
+                            LPWSTR toString = const_cast<LPWSTR>(L"toString");
+                            DISPID dispId;
+                            hr = dispatch->GetIDsOfNames(IID_NULL, &toString, 1, LOCALE_USER_DEFAULT, &dispId);
+                            if (SUCCEEDED(hr)) {
+                                DISPPARAMS params{};
+                                hr = dispatch->Invoke(dispId, IID_NULL, LOCALE_USER_DEFAULT, DISPATCH_METHOD, &params, &result, nullptr, nullptr);
+                                if (!SUCCEEDED(hr)) {}
+                            }
+                        }
+
+                        pszTextW[0] = L'\0';
+                        iSelCount = iSelCount * 2 + padding;
+                        hr = pfnVariantToString(result, pszTextW, static_cast<UINT>(iSelCount));
+                        if (SUCCEEDED(hr) && pszTextW[0]) {
+                            pszText[0] = ' ';
+                            iSelCount = context.textLength - 1;
+                            iSelCount = WideCharToMultiByte(context.cpEdit, 0, pszTextW, -1, pszText + 1, static_cast<int>(iSelCount), nullptr, nullptr);
+
+                            const Sci_Position iSelEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
+                            ::SendMessage(hSci, SCI_INSERTTEXT, iSelEnd, reinterpret_cast<LPARAM>(pszText));
+                            ::SendMessage(hSci, SCI_SETSEL, iSelEnd, iSelEnd + iSelCount);
+                        }
+                    }
+                    VariantClear(&result);
+                }
+                scriptParse->Release();
+            }
+        }
+
+        activeScript->Close();
+        activeScript->Release();
+        ::HeapFree(::GetProcessHeap(), 0, context.pszText);
+    }
+}
+
 void DoCalculate()
 {
-
+    EditCalculateExpr(MenuType::Calculate);
 }
 
 void DoEvalJS()
 {
-
+    EditCalculateExpr(MenuType::EvaluateJS);
 }
 
 void DoRemoveTags()

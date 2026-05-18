@@ -32,65 +32,66 @@
 #include <span>
 #include <memory>
 
-static int g_alignMode = IDC_ALIGN_LEFT;
-
-INT_PTR CALLBACK AlignDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    switch (message)
-    {
-    case WM_INITDIALOG:
-    {
-        // 1. 번역 적용
-        SetWindowText(hwnd, GetTr(_T("Align Lines")));
-        SetDlgItemText(hwnd, IDC_ALIGN_LEFT, GetTr(_T("&Left.")));
-        SetDlgItemText(hwnd, IDC_ALIGN_RIGHT, GetTr(_T("&Right.")));
-        SetDlgItemText(hwnd, IDC_ALIGN_CENTER, GetTr(_T("&Center.")));
-        SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY, GetTr(_T("&Justify.")));
-        SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY_PAR, GetTr(_T("Justify (&Paragraph mode).")));
-        SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
-        SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
-
-        // 2. 이전에 선택했던 라디오 버튼 체크
-        CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, g_alignMode);
-
-        // 3. 부모 창(Notepad++) 중앙 정렬 로직 (이전에 만든 것과 동일)
-        const HWND hwndParent = GetParent(hwnd);
-        if (hwndParent) {
-            RECT rcP, rcD;
-            GetWindowRect(hwndParent, &rcP);
-            GetWindowRect(hwnd, &rcD);
-            SetWindowPos(hwnd, NULL,
-                rcP.left + (rcP.right - rcP.left - (rcD.right - rcD.left)) / 2,
-                rcP.top + (rcP.bottom - rcP.top - (rcD.bottom - rcD.top)) / 2,
-                0, 0, SWP_NOSIZE | SWP_NOZORDER);
-        }
-        return (INT_PTR)TRUE;
-    }
-
-    case WM_COMMAND:
-        // 확인 버튼 클릭 시 현재 선택된 라디오 버튼 ID를 저장하고 종료
-        if (LOWORD(wParam) == IDOK)
-        {
-            for (int id = IDC_ALIGN_LEFT; id <= IDC_ALIGN_JUSTIFY_PAR; id++) {
-                if (IsDlgButtonChecked(hwnd, id)) {
-                    g_alignMode = id;
-                    break;
-                }
-            }
-            EndDialog(hwnd, IDOK);
-            return (INT_PTR)TRUE;
-        }
-        if (LOWORD(wParam) == IDCANCEL)
-        {
-            EndDialog(hwnd, IDCANCEL);
-            return (INT_PTR)TRUE;
-        }
-        break;
-    }
-    return (INT_PTR)FALSE;
-}
 
 namespace {
+
+    static int g_alignMode = IDC_ALIGN_LEFT;
+
+    INT_PTR CALLBACK AlignDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        switch (message)
+        {
+        case WM_INITDIALOG:
+        {
+            // 1. 번역 적용
+            SetWindowText(hwnd, GetTr(_T("Align Lines")));
+            SetDlgItemText(hwnd, IDC_ALIGN_LEFT, GetTr(_T("&Left.")));
+            SetDlgItemText(hwnd, IDC_ALIGN_RIGHT, GetTr(_T("&Right.")));
+            SetDlgItemText(hwnd, IDC_ALIGN_CENTER, GetTr(_T("&Center.")));
+            SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY, GetTr(_T("&Justify.")));
+            SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY_PAR, GetTr(_T("Justify (&Paragraph mode).")));
+            SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
+            SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
+
+            // 2. 이전에 선택했던 라디오 버튼 체크
+            CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, g_alignMode);
+
+            // 3. 부모 창(Notepad++) 중앙 정렬 로직 (이전에 만든 것과 동일)
+            const HWND hwndParent = GetParent(hwnd);
+            if (hwndParent) {
+                RECT rcP, rcD;
+                GetWindowRect(hwndParent, &rcP);
+                GetWindowRect(hwnd, &rcD);
+                SetWindowPos(hwnd, NULL,
+                    rcP.left + (rcP.right - rcP.left - (rcD.right - rcD.left)) / 2,
+                    rcP.top + (rcP.bottom - rcP.top - (rcD.bottom - rcD.top)) / 2,
+                    0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            }
+            return (INT_PTR)TRUE;
+        }
+
+        case WM_COMMAND:
+            // 확인 버튼 클릭 시 현재 선택된 라디오 버튼 ID를 저장하고 종료
+            if (LOWORD(wParam) == IDOK)
+            {
+                for (int id = IDC_ALIGN_LEFT; id <= IDC_ALIGN_JUSTIFY_PAR; id++) {
+                    if (IsDlgButtonChecked(hwnd, id)) {
+                        g_alignMode = id;
+                        break;
+                    }
+                }
+                EndDialog(hwnd, IDOK);
+                return (INT_PTR)TRUE;
+            }
+            if (LOWORD(wParam) == IDCANCEL)
+            {
+                EndDialog(hwnd, IDCANCEL);
+                return (INT_PTR)TRUE;
+            }
+            break;
+        }
+        return (INT_PTR)FALSE;
+    }
 
     // 폭 구하기
     struct interval {

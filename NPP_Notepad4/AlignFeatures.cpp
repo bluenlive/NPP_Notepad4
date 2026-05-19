@@ -32,7 +32,6 @@
 #include <span>
 #include <memory>
 
-
 namespace {
 
     static int g_alignMode = IDC_ALIGN_LEFT;
@@ -44,25 +43,25 @@ namespace {
         case WM_INITDIALOG:
         {
             // 1. 번역 적용
-            SetWindowText(hwnd, GetTr(_T("Align Lines")));
-            SetDlgItemText(hwnd, IDC_ALIGN_LEFT, GetTr(_T("&Left.")));
-            SetDlgItemText(hwnd, IDC_ALIGN_RIGHT, GetTr(_T("&Right.")));
-            SetDlgItemText(hwnd, IDC_ALIGN_CENTER, GetTr(_T("&Center.")));
-            SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY, GetTr(_T("&Justify.")));
-            SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY_PAR, GetTr(_T("Justify (&Paragraph mode).")));
-            SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
-            SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
+            ::SetWindowText(hwnd, GetTr(_T("Align Lines")));
+            ::SetDlgItemText(hwnd, IDC_ALIGN_LEFT, GetTr(_T("&Left.")));
+            ::SetDlgItemText(hwnd, IDC_ALIGN_RIGHT, GetTr(_T("&Right.")));
+            ::SetDlgItemText(hwnd, IDC_ALIGN_CENTER, GetTr(_T("&Center.")));
+            ::SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY, GetTr(_T("&Justify.")));
+            ::SetDlgItemText(hwnd, IDC_ALIGN_JUSTIFY_PAR, GetTr(_T("Justify (&Paragraph mode).")));
+            ::SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
+            ::SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
 
             // 2. 이전에 선택했던 라디오 버튼 체크
-            CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, g_alignMode);
+            ::CheckRadioButton(hwnd, IDC_ALIGN_LEFT, IDC_ALIGN_JUSTIFY_PAR, g_alignMode);
 
             // 3. 부모 창(Notepad++) 중앙 정렬 로직 (이전에 만든 것과 동일)
             const HWND hwndParent = GetParent(hwnd);
             if (hwndParent) {
                 RECT rcP, rcD;
-                GetWindowRect(hwndParent, &rcP);
-                GetWindowRect(hwnd, &rcD);
-                SetWindowPos(hwnd, NULL,
+                ::GetWindowRect(hwndParent, &rcP);
+                ::GetWindowRect(hwnd, &rcD);
+                ::SetWindowPos(hwnd, nullptr,
                     rcP.left + (rcP.right - rcP.left - (rcD.right - rcD.left)) / 2,
                     rcP.top + (rcP.bottom - rcP.top - (rcD.bottom - rcD.top)) / 2,
                     0, 0, SWP_NOSIZE | SWP_NOZORDER);
@@ -71,24 +70,27 @@ namespace {
         }
 
         case WM_COMMAND:
+        {
+            const WORD wpLow = LOWORD(wParam);
             // 확인 버튼 클릭 시 현재 선택된 라디오 버튼 ID를 저장하고 종료
-            if (LOWORD(wParam) == IDOK)
+            if (wpLow == IDOK)
             {
                 for (int id = IDC_ALIGN_LEFT; id <= IDC_ALIGN_JUSTIFY_PAR; id++) {
-                    if (IsDlgButtonChecked(hwnd, id)) {
+                    if (::IsDlgButtonChecked(hwnd, id)) {
                         g_alignMode = id;
                         break;
                     }
                 }
-                EndDialog(hwnd, IDOK);
+                ::EndDialog(hwnd, IDOK);
                 return (INT_PTR)TRUE;
             }
-            if (LOWORD(wParam) == IDCANCEL)
+            if (wpLow == IDCANCEL)
             {
-                EndDialog(hwnd, IDCANCEL);
+                ::EndDialog(hwnd, IDCANCEL);
                 return (INT_PTR)TRUE;
             }
             break;
+        }
         }
         return (INT_PTR)FALSE;
     }
@@ -278,7 +280,7 @@ void ExecuteAlignLines(const int nMode) {
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
     const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
-    if (::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0) != 0) return;
+    if (!hSci || ::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0) != 0) return;
 
     constexpr Sci_Position BUFSIZE_ALIGN = 1024;
 
@@ -319,11 +321,11 @@ void ExecuteAlignLines(const int nMode) {
                 char tchLineBuf[BUFSIZE_ALIGN * 3]{ "" };
                 wchar_t wchLineBuf[BUFSIZE_ALIGN * 3]{ L"" };
 
-                Sci_Position cchLine = ::SendMessage(hSci, SCI_GETLINE, iLine, (LPARAM)tchLineBuf);
+                const Sci_Position cchLine = ::SendMessage(hSci, SCI_GETLINE, iLine, (LPARAM)tchLineBuf);
                 Sci_Position iEndColNew = 0;
                 MultiByteToWideChar(CP_UTF8, 0, tchLineBuf, (int)cchLine, wchLineBuf, _countof(wchLineBuf));
 
-                wchar_t* p = wchLineBuf;
+                const wchar_t* p = wchLineBuf;
                 for (Sci_Position i = 0; i < iEndCol; ++i, ++p) {
                     const wchar_t uc = *p;
                     if (!IsSurrogate(uc)) {
@@ -345,8 +347,8 @@ void ExecuteAlignLines(const int nMode) {
             }
 
             const Sci_Position iIndentCol = ::SendMessage(hSci, SCI_GETLINEINDENTATION, iLine, 0);
-            iMinIndent = (std::min)(iMinIndent, iIndentCol);
-            iMaxLength = (std::max)(iMaxLength, iEndCol);
+            iMinIndent = std::min<Sci_Position>(iMinIndent, iIndentCol);
+            iMaxLength = std::max<Sci_Position>(iMaxLength, iEndCol);
         }
     }
 
@@ -359,7 +361,7 @@ void ExecuteAlignLines(const int nMode) {
             WCHAR wchNewLineBuf[BUFSIZE_ALIGN * 3];
         };
         // NPP 환경에 맞게 std::unique_ptr로 안전하게 관리 (Notepad4의 HeapAlloc 대응)
-        auto var = std::make_unique<EditAlignTextVar>();
+        const auto var = std::make_unique<EditAlignTextVar>();
 
         ::SendMessage(hSci, SCI_BEGINUNDOACTION, 0, 0);
         for (Sci_Position iLine = iLineStart; iLine <= iLineEnd; iLine++) {
@@ -405,7 +407,7 @@ void ExecuteAlignLines(const int nMode) {
                         const WCHAR uc = *p;
                         if (!IsSurrogate(uc)) {
                             iWordsLength += GetConsoleWidth1CH((int)uc);
-                            var->pWords[iWords++] = ++p;
+                            var->pWords[iWords++] = p++;
                         }
                         else {
                             const WCHAR uc2{ p[1] };
@@ -418,7 +420,7 @@ void ExecuteAlignLines(const int nMode) {
                                 // ERROR 발생, 응급조치
                                 // iWordsLength는 정확성이 없는 값임
                                 iWordsLength += GetConsoleWidth1CH((int)uc);
-                                var->pWords[iWords++] = ++p;
+                                var->pWords[iWords++] = p++;
                             }
                         }
                         while (*p && *p != L' ' && *p != L'\t') {
@@ -464,16 +466,15 @@ void ExecuteAlignLines(const int nMode) {
                             }
                         }
 
-                        if ((nMode == IDC_ALIGN_JUSTIFY || nMode == IDC_ALIGN_JUSTIFY_PAR) &&
-                            iWords > 1 && iWordsLength >= 2 &&
+                        if (iWords > 1 && iWordsLength >= 2 &&
                             ((nMode != IDC_ALIGN_JUSTIFY_PAR || !bNextLineIsBlank || iLineStart == iLineEnd) ||
                                 (bNextLineIsBlank && iWordsLength * 4 > (iMaxLength - iMinIndent) * 3))) {
                             const int iGaps = iWords - 1;
                             const Sci_Position iSpacesPerGap = (iMaxLength - iMinIndent - iWordsLength) / iGaps;
                             const Sci_Position iExtraSpaces = (iMaxLength - iMinIndent - iWordsLength) % iGaps;
 
-                            lstrcpy(var->wchNewLineBuf, var->pWords[0]);
-                            p = var->wchNewLineBuf + wcslen(var->wchNewLineBuf);
+                            ::wcscpy_s(var->wchNewLineBuf, var->pWords[0]);
+                            p = var->wchNewLineBuf + ::wcslen(var->wchNewLineBuf);
 
                             for (int i = 1; i < iWords; i++) {
                                 for (Sci_Position j = 0; j < iSpacesPerGap; j++) {
@@ -483,27 +484,29 @@ void ExecuteAlignLines(const int nMode) {
                                     *p++ = L' ';
                                 }
                                 *p = L'\0';
-                                lstrcat(p, var->pWords[i]);
-                                p += wcslen(p);
+                                const size_t rem = (var->wchNewLineBuf + std::size(var->wchNewLineBuf)) - p;
+                                ::wcscpy_s(p, rem, var->pWords[i]);
+                                p += ::wcslen(p);
                             }
 
-                            WideCharToMultiByte(CP_UTF8, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
+                            ::WideCharToMultiByte(CP_UTF8, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
                             ::SendMessage(hSci, SCI_SETTARGETRANGE, (WPARAM)::SendMessage(hSci, SCI_POSITIONFROMLINE, iLine, 0), (LPARAM)::SendMessage(hSci, SCI_GETLINEENDPOSITION, iLine, 0));
                             ::SendMessage(hSci, SCI_REPLACETARGET, -1, (LPARAM)var->tchLineBuf);
                             ::SendMessage(hSci, SCI_SETLINEINDENTATION, iLine, iMinIndent);
                         }
                         else {
-                            lstrcpy(var->wchNewLineBuf, var->pWords[0]);
-                            p = var->wchNewLineBuf + wcslen(var->wchNewLineBuf);
+                            ::wcscpy_s(var->wchNewLineBuf, var->pWords[0]);
+                            p = var->wchNewLineBuf + ::wcslen(var->wchNewLineBuf);
 
-                            for (int i = 1; i < iWords; i++) {
+                            for (int i = 1; i < iWords; ++i) {
                                 *p++ = L' ';
                                 *p = L'\0';
-                                lstrcat(var->wchNewLineBuf, var->pWords[i]);
-                                p += wcslen(p);
+                                const size_t rem = (var->wchNewLineBuf + std::size(var->wchNewLineBuf)) - p;
+                                ::wcscpy_s(p, rem, var->pWords[i]);
+                                p += ::wcslen(p);
                             }
-
-                            WideCharToMultiByte(CP_UTF8, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
+                            
+                            ::WideCharToMultiByte(CP_UTF8, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
                             ::SendMessage(hSci, SCI_SETTARGETRANGE, (WPARAM)::SendMessage(hSci, SCI_POSITIONFROMLINE, iLine, 0), (LPARAM)::SendMessage(hSci, SCI_GETLINEENDPOSITION, iLine, 0));
                             ::SendMessage(hSci, SCI_REPLACETARGET, -1, (LPARAM)var->tchLineBuf);
                             ::SendMessage(hSci, SCI_SETLINEINDENTATION, iLine, iMinIndent);
@@ -527,19 +530,23 @@ void ExecuteAlignLines(const int nMode) {
                         *p = L'\0';
 
                         for (int i = 0; i < iWords; i++) {
-                            lstrcat(p, var->pWords[i]);
+                            const size_t rem = (var->wchNewLineBuf + std::size(var->wchNewLineBuf)) - p;
+                            ::wcscpy_s(p, rem, var->pWords[i]);
+                            p += ::wcslen(p);
+
                             if (i < iWords - 1) {
-                                lstrcat(p, L" ");
+                                *p++ = L' ';
+                                *p = L'\0';
                             }
                             // 가운데 정렬 시 홀수 공백 보정
                             if (nMode == IDC_ALIGN_CENTER && iWords > 1 && iOddSpaces > 0 && i + 1 >= iWords / 2) {
-                                lstrcat(p, L" ");
+                                *p++ = L' ';
+                                *p = L'\0';
                                 --iOddSpaces;
                             }
-                            p += wcslen(p);
                         }
 
-                        WideCharToMultiByte(cpEdit, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
+                        ::WideCharToMultiByte(cpEdit, 0, var->wchNewLineBuf, -1, var->tchLineBuf, sizeof(var->tchLineBuf), nullptr, nullptr);
 
                         Sci_Position iPos;
                         if (nMode == IDC_ALIGN_RIGHT || nMode == IDC_ALIGN_CENTER) {

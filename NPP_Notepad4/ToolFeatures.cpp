@@ -24,17 +24,13 @@
 
 
 #include "pch.h"
-#include <windows.h>
-#include <shlwapi.h>
-#include <propvarutil.h>
 #include <activscp.h>
 #include "ToolFeatures.h"
 #include "Common.h"
+#include <algorithm>
 #include <vector>
 #include <string>
-#include <algorithm>
 
-extern NppData nppData;
 extern int g_cachedLangType; // NPPN_LANGCHANGED 등에서 캐싱된 언어 타입
 
 namespace {
@@ -125,9 +121,9 @@ namespace {
 
         const Sci_Position selStart = ::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
         const Sci_Position selEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
-        Sci_Position iSelCount = selEnd - selStart;
+        const Sci_Position rawSelCount = selEnd - selStart;
 
-        if (iSelCount <= 0) {
+        if (rawSelCount <= 0) {
             return;
         }
 
@@ -166,8 +162,10 @@ namespace {
         }
 
         constexpr size_t padding = 1024; // for CMD_CALCULATE_EXPR
-        iSelCount = (iSelCount + 1 + MEMORY_ALLOCATION_ALIGNMENT - 1) & ~(MEMORY_ALLOCATION_ALIGNMENT - 1);
-        iSelCount = std::max<Sci_Position>(iSelCount, 1024); // increased to store result and error message
+        const Sci_Position iSelCount = std::max<Sci_Position> (
+            (rawSelCount + 1 + MEMORY_ALLOCATION_ALIGNMENT - 1) & ~(MEMORY_ALLOCATION_ALIGNMENT - 1),
+            1024
+        );
 
         CalcContext context;
         context.hSci = hSci;    // Notepad4에서는 사용하지 않음
@@ -202,7 +200,7 @@ namespace {
                         context.lineStart = 1;
                         pszBuf += iSelCount;
                         // Use with(Math) to avoid writing it everywhere.
-                        wsprintf(pszBuf, L"with(Math){\n%s}", pszTextW);
+                        ::swprintf_s(pszBuf, iSelCount + padding, L"with(Math){\n%s}", pszTextW);
                         // regex replace() to support pow operator ^
                         /*wsprintf(pszBuf,
                             L"(function(s){"
@@ -215,7 +213,8 @@ namespace {
                     if (SUCCEEDED(hr)) {
                         if (result.vt == VT_DISPATCH) { // call result object's toString() method
                             IDispatch* const dispatch = result.pdispVal;
-                            LPWSTR toString = const_cast<LPWSTR>(L"toString");
+                            WCHAR szToString[] = L"toString";
+                            LPOLESTR toString = szToString;
                             DISPID dispId;
                             hr = dispatch->GetIDsOfNames(IID_NULL, &toString, 1, LOCALE_USER_DEFAULT, &dispId);
                             if (SUCCEEDED(hr)) {
@@ -226,16 +225,16 @@ namespace {
                         }
 
                         pszTextW[0] = L'\0';
-                        iSelCount = iSelCount * 2 + padding;
+                        const Sci_Position outBufferCount = iSelCount * 2 + padding;
                         hr = pfnVariantToString(result, pszTextW, static_cast<UINT>(iSelCount));
                         if (SUCCEEDED(hr) && pszTextW[0]) {
                             pszText[0] = ' ';
-                            iSelCount = context.textLength - 1;
-                            iSelCount = WideCharToMultiByte(context.cpEdit, 0, pszTextW, -1, pszText + 1, static_cast<int>(iSelCount), nullptr, nullptr);
-
+                            const Sci_Position destLength = context.textLength - 1;
+                            const int iWriteCount = ::WideCharToMultiByte(context.cpEdit, 0, pszTextW, -1, pszText + 1, static_cast<int>(destLength), nullptr, nullptr);
+                            
                             const Sci_Position iSelEnd = ::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
                             ::SendMessage(hSci, SCI_INSERTTEXT, iSelEnd, reinterpret_cast<LPARAM>(pszText));
-                            ::SendMessage(hSci, SCI_SETSEL, iSelEnd, iSelEnd + iSelCount);
+                            ::SendMessage(hSci, SCI_SETSEL, iSelEnd, iSelEnd + iWriteCount);
                         }
                     }
                     VariantClear(&result);
@@ -285,10 +284,10 @@ void DoRemoveTags()
     bufUtf8[lenUtf8] = 0;
 
     // 4. UTF-8 -> UTF-16 (WCHAR) 변환 (알고리즘 호환용)
-    int cchTextW = MultiByteToWideChar(CP_UTF8, 0, bufUtf8.data(), -1, NULL, 0);
-    std::vector<WCHAR> pszTextW(cchTextW);
-    MultiByteToWideChar(CP_UTF8, 0, bufUtf8.data(), -1, pszTextW.data(), cchTextW);
-    --cchTextW; // NULL 문자 제외
+    const int cchTextW_needed = ::MultiByteToWideChar(CP_UTF8, 0, bufUtf8.data(), -1, NULL, 0);
+    std::vector<WCHAR> pszTextW(cchTextW_needed);
+    ::MultiByteToWideChar(CP_UTF8, 0, bufUtf8.data(), -1, pszTextW.data(), cchTextW_needed);
+    const int cchTextW = cchTextW_needed - 1; // NULL 문자 제외
 
     // 5. 결과 버퍼 확보 및 알고리즘 변수 초기화
     struct ChangeHunk {
@@ -302,7 +301,7 @@ void DoRemoveTags()
     bool bInStyle = false;
 
     // --- Notepad4 알고리즘 시작 ---
-    auto IsBlockTag = [](const WCHAR* name) {
+    const auto IsBlockTag = [](const WCHAR* const name) -> bool {
         static constexpr const WCHAR* blocks[] = {
             L"div", L"p", L"br", L"hr", L"tr", L"li", L"h1", L"h2", L"h3",
             L"h4", L"h5", L"h6", L"blockquote", L"pre", L"section",
@@ -311,13 +310,13 @@ void DoRemoveTags()
             L"script", L"style"
         };
         for (const auto& b : blocks) {
-            if (_wcsicmp(name, b) == 0)
+            if (::_wcsicmp(name, b) == 0)
                 return true;
         }
         return false;
     };
     
-    auto GetBytePos = [&](const UINT idx) -> Sci_Position {
+    const auto GetBytePos = [&](const UINT idx) -> Sci_Position {
         return selStart + (Sci_Position)WideCharToMultiByte(CP_UTF8, 0, pszTextW.data(), idx, NULL, 0, NULL, NULL);
     };
 
@@ -338,7 +337,7 @@ void DoRemoveTags()
                     else if (peek < (UINT)cchTextW && (pszTextW[peek] == L'!' || pszTextW[peek] == L'?'))
                         ++peek;
 
-                    while (peek < (UINT)cchTextW && t < 31 && iswalnum(pszTextW[peek])) {
+                    while (peek < (UINT)cchTextW && t < 31 && ::iswalnum(pszTextW[peek])) {
                         tagName[t++] = pszTextW[peek++];
                     }
                     tagName[t] = L'\0';
@@ -348,15 +347,15 @@ void DoRemoveTags()
 
                     // 스크립트/스타일 상태 제어
                     if (!isClosing) {
-                        if (_wcsicmp(tagName, L"script") == 0)
+                        if (::_wcsicmp(tagName, L"script") == 0)
                             bInScript = true;
-                        else if (_wcsicmp(tagName, L"style") == 0)
+                        else if (::_wcsicmp(tagName, L"style") == 0)
                             bInStyle = true;
                     }
                     else {
-                        if (bInScript && _wcsicmp(tagName, L"script") == 0)
+                        if (bInScript && ::_wcsicmp(tagName, L"script") == 0)
                             bInScript = false;
-                        else if (bInStyle && _wcsicmp(tagName, L"style") == 0)
+                        else if (bInStyle && ::_wcsicmp(tagName, L"style") == 0)
                             bInStyle = false;
                     }
 
@@ -395,7 +394,7 @@ void DoRemoveTags()
             const Sci_Position bEnd = GetBytePos(s);
 
             // 앞뒤 문맥을 보고 삽입할 구분자(공백/줄바꿈) 결정
-            std::string repText = "";
+            std::string repText;
             const WCHAR prevChar = (hunkStartIdx > 0) ? pszTextW[hunkStartIdx - 1] : 0;
             const WCHAR nextChar = (s < cchTextW) ? pszTextW[s] : 0;
 
@@ -445,7 +444,7 @@ void DoRemoveComments()
     const Sci_Position docLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
 
     // --- [람다 1] Python 트리플 쿼트 문맥 판별 ---
-    auto IsPythonStandaloneDocstring = [](const HWND hSci, const Sci_Position blockStart) -> bool {
+    const auto IsPythonStandaloneDocstring = [](const HWND hSci, const Sci_Position blockStart) -> bool {
         const Sci_Line line = ::SendMessage(hSci, SCI_LINEFROMPOSITION, blockStart, 0);
         const Sci_Position lineStart = ::SendMessage(hSci, SCI_POSITIONFROMLINE, line, 0);
         bool isFirstOnLine = true;
@@ -460,14 +459,14 @@ void DoRemoveComments()
             if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n' || style == 1 || style == 12) {
                 --p; continue;
             }
-            if (strchr("(=[,{+", ch)) return false;
+            if (::strchr("(=[,{+", ch)) return false;
             break;
         }
         return isFirstOnLine;
     };
 
     // --- [람다 2] 스타일 판별 (이중 switch-case) ---
-    auto IsCommentStyle = [&](const HWND hSci, const Sci_Position pos, const int style) -> bool {
+    const auto IsCommentStyle = [&](const HWND hSci, const Sci_Position pos, const int style) -> bool {
         switch (g_cachedLangType) {
         case L_C:
         case L_CPP:
@@ -525,7 +524,7 @@ void DoRemoveComments()
     };
 
     // --- [람다 3] 블록 주석 여부 판별 (이중 switch-case) ---
-    auto IsBlockCommentStyle = [](const int style) -> bool {
+    const auto IsBlockCommentStyle = [](const int style) -> bool {
         switch (g_cachedLangType) {
         case L_C:
         case L_CPP:
@@ -561,7 +560,7 @@ void DoRemoveComments()
     };
 
     // --- [람다 4] 제거 실행 (멀티라인 대응) ---
-    auto ProcessCommentRemoval = [&](const Sci_Position start, const Sci_Position end) {
+    const auto ProcessCommentRemoval = [&](const Sci_Position start, const Sci_Position end) {
         // 시작 위치와 끝 위치의 행 번호를 각각 계산
         const Sci_Line lineS = ::SendMessage(hSci, SCI_LINEFROMPOSITION, start, 0);
         const Sci_Line lineE = ::SendMessage(hSci, SCI_LINEFROMPOSITION, end, 0);
@@ -569,7 +568,7 @@ void DoRemoveComments()
         const Sci_Position fullStartPos = ::SendMessage(hSci, SCI_POSITIONFROMLINE, lineS, 0);
         const Sci_Position fullEndPos = ::SendMessage(hSci, SCI_GETLINEENDPOSITION, lineE, 0);
 
-        auto IsSpaceExtra = [](const unsigned char c) { return c == ' ' || c == '\t' || c == 0xA0; };
+        const auto IsSpaceExtra = [](const unsigned char c) { return c == ' ' || c == '\t' || c == 0xA0; };
 
         // 시작 부분 공백 트리밍
         Sci_Position finalStart = start;
@@ -586,7 +585,7 @@ void DoRemoveComments()
         // 주석 범위가 시작 행의 처음부터 끝 행의 마지막까지를 모두 차지한다면 (즉, 행 전체가 주석군)
         if (finalStart == fullStartPos && finalEnd == fullEndPos) {
             // 마지막 행의 줄바꿈 문자까지 포함해서 삭제
-            Sci_Position nextLineStart = ::SendMessage(hSci, SCI_POSITIONFROMLINE, lineE + 1, 0);
+            const Sci_Position nextLineStart = ::SendMessage(hSci, SCI_POSITIONFROMLINE, lineE + 1, 0);
             if (nextLineStart > 0)
                 ::SendMessage(hSci, SCI_DELETERANGE, fullStartPos, nextLineStart - fullStartPos);
             else
@@ -599,9 +598,9 @@ void DoRemoveComments()
     };
 
     // --- [람다 5] 스타일 패밀리 판별 ---
-    auto IsSameFamily = [](const int s1, const int s2) {
+    const auto IsSameFamily = [](const int s1, const int s2) {
         if (g_cachedLangType == L_C || g_cachedLangType == L_CPP) {
-            auto isC = [](const int s) {
+            const auto isC = [](const int s) {
                 return (s == SCE_C_COMMENT || s == SCE_C_COMMENTLINE ||
                         s == SCE_C_COMMENTDOC || s == SCE_C_COMMENTLINEDOC ||
                         s == SCE_C_COMMENTDOCKEYWORD || s == SCE_C_PREPROCESSORCOMMENT ||
@@ -623,7 +622,7 @@ void DoRemoveComments()
             --startPos;
     }
     if (endPos > 0) {
-        int endStyle = (int)::SendMessage(hSci, SCI_GETSTYLEAT, endPos - 1, 0);
+        const int endStyle = (int)::SendMessage(hSci, SCI_GETSTYLEAT, endPos - 1, 0);
         if (IsBlockCommentStyle(endStyle)) {
             while (endPos < docLen && (int)::SendMessage(hSci, SCI_GETSTYLEAT, endPos, 0) == endStyle)
                 ++endPos;

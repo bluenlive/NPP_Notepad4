@@ -28,14 +28,14 @@
 #include "Common.h"
 #include <string>
 #include <string_view>
+#include <algorithm>
 #include <vector>
-//#include <windows.h>
 
 void DoHanjaToHangul()
 {
     int whichView = 0;
     ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
-    HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+    const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
     ::SendMessage(hSci, WM_IME_KEYDOWN, VK_HANJA, 0);
 }
@@ -43,15 +43,17 @@ void DoHanjaToHangul()
 namespace {
 
     //  콜백 함수 타입 정의: 날것의 문자열 뷰, 그리고 코드 페이지를 받음
-    typedef std::string(*TransformCallback)(std::string_view, UINT);
+    using TransformCallback = std::string(*)(std::string_view, UINT);
 
     void DoCommonTransform(const TransformCallback transformFunc) {
         int whichView = 0;
         ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
         const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
-        UINT cpDoc = (UINT)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
-        if (cpDoc == 0) cpDoc = ::GetACP();
+        if (!hSci) return;
+
+        const UINT cpRaw = static_cast<UINT>(::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0));
+        const UINT cpDoc = (cpRaw == 0) ? ::GetACP() : cpRaw;
 
         const int selCount = (int)::SendMessage(hSci, SCI_GETSELECTIONS, 0, 0);
         bool isUndoOpened = false;
@@ -91,23 +93,23 @@ namespace {
 
     // --- 인코딩/디코딩 헬퍼 함수 ---
 
-    std::wstring ConvertToWString(std::string_view s, UINT cp) {
+    std::wstring ConvertToWString(const std::string_view s, const UINT cp) {
         if (s.empty()) return L"";
-        int len = ::MultiByteToWideChar(cp, 0, s.data(), (int)s.length(), NULL, 0);
+        const int len = ::MultiByteToWideChar(cp, 0, s.data(), (int)s.length(), NULL, 0);
         std::wstring ws(len, L'\0');
         ::MultiByteToWideChar(cp, 0, s.data(), (int)s.length(), ws.data(), len);
         return ws;
     }
 
-    std::string ConvertToString(std::wstring_view ws, UINT cp) {
+    std::string ConvertToString(const std::wstring_view ws, const UINT cp) {
         if (ws.empty()) return "";
-        int len = ::WideCharToMultiByte(cp, 0, ws.data(), (int)ws.length(), NULL, 0, NULL, NULL);
+        const int len = ::WideCharToMultiByte(cp, 0, ws.data(), (int)ws.length(), NULL, 0, NULL, NULL);
         std::string s(len, '\0');
         ::WideCharToMultiByte(cp, 0, ws.data(), (int)ws.length(), s.data(), len, NULL, NULL);
         return s;
     }
 
-    std::string HangulDecomposeCore(std::string_view sRaw, UINT cpDoc) {
+    std::string HangulDecomposeCore(const std::string_view sRaw, const UINT cpDoc) {
 
         // 1. 초성 (19개)
         static constexpr const wchar_t* kChoSplit[] = {
@@ -159,8 +161,8 @@ namespace {
             }
             // 2. 호환 자모 중 분리 가능 범위 (ㄳ ~ ㅢ)
             else if (w >= 0x3133 && w <= 0x3162) {
-                auto it = std::lower_bound(std::begin(kDecompTable), std::end(kDecompTable), w,
-                    [](const JamoMapping& m, wchar_t key) { return m.key < key; });
+                const auto it = std::lower_bound(std::begin(kDecompTable), std::end(kDecompTable), w,
+                    [](const JamoMapping& m, const wchar_t key) { return m.key < key; });
 
                 if (it != std::end(kDecompTable) && it->key == w) {
                     wsMapped += it->value;
@@ -178,7 +180,7 @@ namespace {
         return (wsMapped != wsText) ? ConvertToString(wsMapped, cpDoc) : std::string(sRaw);
     }
 
-    std::string HangulToggleCore(std::string_view sRaw, const UINT cpDoc) {
+    std::string HangulToggleCore(const std::string_view sRaw, const UINT cpDoc) {
         if (sRaw.empty()) return std::string(sRaw);
 
         const std::wstring wsText = ConvertToWString(sRaw, cpDoc);
@@ -196,7 +198,7 @@ namespace {
                 const wchar_t c = w0 - 0xAC00;
                 wsMapped += static_cast<wchar_t>(0x1100 + c / 588);
                 wsMapped += static_cast<wchar_t>(0x1161 + (c % 588) / 28);
-                wchar_t c3 = static_cast<wchar_t>(0x11A8 + c % 28 - 1);
+                const wchar_t c3 = static_cast<wchar_t>(0x11A8 + c % 28 - 1);
                 if (c3 != 0x11A7) wsMapped += c3;
                 ++s;
             }
@@ -331,7 +333,7 @@ void DoKssmToWansung() {
             ++i;
         }
         else if (i + 1 < totalLen) { // KSSM (Johab)
-            unsigned char b2 = pSrc[i + 1];
+            const unsigned char b2 = pSrc[i + 1];
 
             // 추억의 비트 구조: 1 CCCCC JJ | JJJ TTTTT
             const int cho = (b1 >> 2) & 0x1F;
@@ -374,9 +376,9 @@ void DoKssmToWansung() {
 
     // [4] 결과 적용
     if (!wResult.empty()) {
-        int ansiLen = WideCharToMultiByte(949, 0, wResult.data(), (int)wResult.size(), nullptr, 0, nullptr, nullptr);
+        const int ansiLen = ::WideCharToMultiByte(949, 0, wResult.data(), (int)wResult.size(), nullptr, 0, nullptr, nullptr);
         std::vector<char> ansiResult(ansiLen + 1, 0);
-        WideCharToMultiByte(949, 0, wResult.data(), (int)wResult.size(), ansiResult.data(), ansiLen, nullptr, nullptr);
+        ::WideCharToMultiByte(949, 0, wResult.data(), (int)wResult.size(), ansiResult.data(), ansiLen, nullptr, nullptr);
 
         ::SendMessage(hSci, SCI_BEGINUNDOACTION, 0, 0);
         ::SendMessage(hSci, SCI_SETTARGETSTART, 0, 0);
@@ -385,10 +387,8 @@ void DoKssmToWansung() {
 
         // 위치 복원
         const Sci_Position newMaxLen = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
-        Sci_Position newAnchor = anchorPos + anchorShift;
-        Sci_Position newCaret = caretPos + caretShift;
-        if (newAnchor > newMaxLen) newAnchor = newMaxLen;
-        if (newCaret > newMaxLen) newCaret = newMaxLen;
+        const Sci_Position newAnchor = std::min<Sci_Position>(anchorPos + anchorShift, newMaxLen);
+        const Sci_Position newCaret = std::min<Sci_Position>(caretPos + caretShift, newMaxLen);
 
         ::SendMessage(hSci, SCI_SETSEL, newAnchor, newCaret);
         ::SendMessage(hSci, SCI_SETFIRSTVISIBLELINE, firstLine, 0);

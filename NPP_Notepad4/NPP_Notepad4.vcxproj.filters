@@ -63,6 +63,12 @@
     <ClInclude Include="NPP_Notepad4.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="NppResourceID.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="FindFeatures.h">
+      <Filter>features</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -79,6 +85,9 @@
     </ClCompile>
     <ClCompile Include="NPP_Notepad4.cpp">
       <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="FindFeatures.cpp">
+      <Filter>features</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

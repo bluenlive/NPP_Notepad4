@@ -68,7 +68,7 @@ namespace {
             Sci_TextRangeFull tr = { {start, end}, sRaw.data() };
             ::SendMessage(hSci, SCI_GETTEXTRANGEFULL, 0, (LPARAM)&tr);
 
-            // [B] 본체 호출: 이제 어떤 메뉴인지 묻지 않고 바로 실행합니다.
+            // [B] 본체 호출: 이제 어떤 메뉴인지 묻지 않고 바로 실행
             const std::string sMapped = transformFunc(sRaw, cpDoc);
 
             if (sMapped != sRaw) {

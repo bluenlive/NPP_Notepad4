@@ -29,8 +29,13 @@
 #include "pch.h"
 #include "framework.h"
 #include "NPP_Notepad4.h"
+#include <vector>
+#include <string>
+#include <iterator>
+#include <map>
 
 #include "AlignFeatures.h"
+#include "FindFeatures.h"
 #include "KoreanFeatures.h"
 #include "ToolFeatures.h"
 
@@ -39,17 +44,17 @@
 #include "Notepad_plus_msgs.h" // nppData 구조체가 들어있음
 #include "Scintilla.h"
 
+// 새로운 정규식 주입 기능 함수 선언 외부 참조
+
 // --- 전역 변수 ---
-HINSTANCE g_hInst = NULL;
+HINSTANCE g_hInst = nullptr;
 NppData nppData;
 FuncItem funcItem[100];
 int g_funcCount = 0;
 bool g_isKorean = false;
 int g_cachedLangType = 0;
 
-// 서브 메뉴 위치 기록용
-int g_posTextTrans = -1;
-int g_posWebTools = -1;
+std::map<std::wstring, int> g_subMenuPositions;
 
 // --- [1] DLL 진입점 (DllMain) ---
 
@@ -59,7 +64,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
     case DLL_PROCESS_ATTACH:
         g_hInst = hModule;
-        DisableThreadLibraryCalls(hModule);
+        ::DisableThreadLibraryCalls(hModule);
         break;
     case DLL_PROCESS_DETACH:
         break;
@@ -71,56 +76,72 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
 void DetectLanguage()
 {
-    size_t len = (size_t)::SendMessage(nppData._nppHandle, NPPM_GETNATIVELANGFILENAME, 0, 0);
+    const size_t len = static_cast<size_t>(::SendMessage(nppData._nppHandle, NPPM_GETNATIVELANGFILENAME, 0, 0));
     if (len > 0)
     {
         std::vector<char> langFile(len + 1);
-        ::SendMessage(nppData._nppHandle, NPPM_GETNATIVELANGFILENAME, (WPARAM)(len + 1), (LPARAM)langFile.data());
+        ::SendMessage(nppData._nppHandle, NPPM_GETNATIVELANGFILENAME, static_cast<WPARAM>(len + 1), reinterpret_cast<LPARAM>(langFile.data()));
 
-        _strlwr_s(langFile.data(), len + 1);
-        g_isKorean = (strstr(langFile.data(), "korean") != nullptr);
+        ::_strlwr_s(langFile.data(), len + 1);
+        g_isKorean = (::strstr(langFile.data(), "korean") != nullptr);
     }
     else g_isKorean = false;
 }
 
-enum class MenuType { PluginName, Item, Separator, SubHeader };
+enum class MenuType { PluginName, Item, Separator, SubHeader, SubEnd };
 struct MenuEntry {
     const TCHAR* eng;
     const TCHAR* kor;
     PFUNCPLUGINCMD pFunc;
     MenuType type;
-    int* pPosOut;
 };
 
+// 서브 메뉴 헤더가 나오면 이후 메뉴는 서브 메뉴의 하위 메뉴
+// 이것은 Separator(구분선) 또는 SubEnd가 나올 때까지 계속됨
 static const MenuEntry g_menuTable[] = {
     // [0] 간판
-    { _T("BLUEnLIVE's Notepad4"), _T("BLUEnLIVE의 Notepad4"), nullptr, MenuType::PluginName, nullptr },
+    { _T("BLUE's Notepad4"), _T("BLUE의 Notepad4"), nullptr, MenuType::PluginName },
 
-    // [1~3] 일반 아이템
-    { _T("Alig&n Lines..."),      _T("좌우 정렬(&N)..."),     DoAlignDlg,    MenuType::Item, nullptr },
-    { _T("---"),                  nullptr,                    nullptr,       MenuType::Separator, nullptr },
-    { _T("&Calculate Expression"), _T("수식 계산(&C)"),       DoCalculate,   MenuType::Item, nullptr },
+    // 서브 메뉴 헤더 1: 편집
+    { _T("&Edit"), _T("편집(&E)"),     nullptr,       MenuType::SubHeader },
 
-    // [4] 서브 메뉴 헤더 1
-    { _T("Text &Transliteration"), _T("텍스트 변환(&T)"),     nullptr,       MenuType::SubHeader, &g_posTextTrans },
+    // 서브 메뉴 아이템들 (편집)
+    { _T("Alig&n Lines..."),      _T("좌우 정렬(&N)..."),     DoAlignDlg,    MenuType::Item },
+    
+    // 서브 메뉴 헤더 2: 찾기
+    { _T("&Find"), _T("찾기(&F)"),     nullptr,       MenuType::SubHeader },
 
-    // [5~8] 서브 메뉴 아이템들
-    { _T("Korean Han&ja to Hangul"), _T("한국어 한자를 한글로(&J)"), DoHanjaToHangul, MenuType::Item, nullptr },
-    { _T("Korean Han&gul Decomposition"), _T("한글을 풀어쓰기로(&G)"), DoHangulDecomp, MenuType::Item, nullptr },
-    { _T("Toggle Unicode Korean &Composition"), _T("유니코드 한글 풀어쓰기↔모아쓰기(&C)"), DoToggleComposition, MenuType::Item, nullptr },
-    { _T("&KSSM to Korean Wansung (Entire File)"), _T("조합형 한글을 완성형으로 (문서 전체)(&K)"), DoKssmToWansung, MenuType::Item, nullptr },
+    // 서브 메뉴 아이템들 (찾기)
+    { _T("Find with &Regex Presets..."), _T("정규식 프리셋으로 찾기(&R)..."), DoInjectRegexPresets, MenuType::Item },
 
-    // [9] 서브 메뉴 헤더 2
-    { _T("&Web Tools"),           _T("웹 개발도구(&W)"),      nullptr,       MenuType::SubHeader, &g_posWebTools },
+    // 서브 메뉴 헤더 3: 선택 영역에 대하여...
+    { _T("Action &on Selection"), _T("선택영역에 대하여...(&O)"), nullptr, MenuType::SubHeader },
 
-    // [10~12] 서브 메뉴 아이템들
-    { _T("&Evaluate JS Expression"), _T("JS 표현식 평가(&E)"),  DoEvalJS,      MenuType::Item, nullptr },
-    { _T("&Remove HTML/XML Tags"), _T("HTML/XML 태그 삭제(&R)"), DoRemoveTags,  MenuType::Item, nullptr },
-    { _T("Remove C&omments (HTML/C++/Py)"), _T("주석 삭제 (HTML/C++/파이썬)(&O)"), DoRemoveComments, MenuType::Item, nullptr },
+    // 서브 메뉴 아이템들 (선택 영역에 대하여...)
+    { _T("&Calculate Expression"), _T("수식 계산(&C)"),        DoCalculate,  MenuType::Item },
 
-    // [13~14] 하단 아이템
-    { _T("---"),                  nullptr,                    nullptr,       MenuType::Separator },
-    { _T("About"),                _T("정보"),                 DoAboutDlg,    MenuType::Item },
+    // 서브 메뉴 헤더 4: 텍스트 변환
+    { _T("Text &Transliteration"), _T("텍스트 변환(&T)"),     nullptr,       MenuType::SubHeader },
+
+    // 서브 메뉴 아이템들 (텍스트 변환)
+    { _T("Korean Han&ja to Hangul"), _T("한국어 한자를 한글로(&J)"), DoHanjaToHangul, MenuType::Item },
+    { _T("Korean Han&gul Decomposition"), _T("한글을 풀어쓰기로(&G)"), DoHangulDecomp, MenuType::Item },
+    { _T("Toggle Unicode Korean &Composition"), _T("유니코드 한글 풀어쓰기↔모아쓰기(&C)"), DoToggleComposition, MenuType::Item },
+    { _T("&KSSM to Korean Wansung (Entire File)"), _T("조합형 한글을 완성형으로 (문서 전체)(&K)"), DoKssmToWansung, MenuType::Item },
+
+    // 서브 메뉴 헤더 5: 웹 개발 도구
+    { _T("&Web Tools"),           _T("웹 개발도구(&W)"),      nullptr,       MenuType::SubHeader },
+
+    // 서브 메뉴 아이템들 (웹 도구)
+    { _T("&Evaluate JS Expression"), _T("JS 표현식 평가(&E)"),  DoEvalJS,    MenuType::Item },
+    { _T("&Remove HTML/XML Tags"), _T("HTML/XML 태그 삭제(&R)"), DoRemoveTags,  MenuType::Item },
+    { _T("Remove C&omments (HTML/C++/Py)"), _T("주석 삭제 (HTML/C++/파이썬)(&O)"), DoRemoveComments, MenuType::Item },
+
+    //{ {},       {},     nullptr,    MenuType::SubEnd },     // 서브 메뉴 종결자, 다음이 Seperator라면 생략 가능
+
+    // 하단 아이템
+    { {},       {},     nullptr,    MenuType::Separator},
+    { _T("About"),                _T("정보"),                  DoAboutDlg,    MenuType::Item },
 };
 
 struct TrEntry {
@@ -137,219 +158,208 @@ static const TrEntry g_uiTrTable[] = {
     { _T("Justify (&Paragraph mode)."),      _T("마지막 행 제외하고 양쪽 정렬(&P)"), },
     { _T("OK"),                              _T("확인"), },
     { _T("Cancel"),                          _T("취소"), },
+    { _T("Regex Preset Find"),               _T("정규식 프리셋 검색"), }, // 찾기 타이틀 번역
 };
 
-const TCHAR* GetTr(const TCHAR* engKey) {
+const TCHAR* GetTr(const TCHAR* const engKey) {
+    if (!engKey) return _T("");
     if (!g_isKorean) return engKey;
 
-    // 1. 먼저 UI 전용 테이블에서 검색
     for (const auto& item : g_uiTrTable) {
-        if (_tcscmp(item.eng, engKey) == 0) return item.kor;
+        if (item.eng && ::_tcscmp(item.eng, engKey) == 0) return item.kor;
     }
-
-    // 2. 없으면 메뉴 테이블에서 검색
     for (const auto& item : g_menuTable) {
-        if (_tcscmp(item.eng, engKey) == 0) return item.kor ? item.kor : item.eng;
+        if (item.eng && ::_tcscmp(item.eng, engKey) == 0) {
+            return item.kor ? item.kor : item.eng;
+        }
     }
-
-    return engKey; // 둘 다 없으면 기본값(영어) 반환
+    return engKey;
 }
 
 // --- [3] Notepad++ 인터페이스 구현 ---
 
 extern "C" __declspec(dllexport) void setInfo(NppData notepadPlusData) {
     nppData = notepadPlusData;
-
-    // 초기 메뉴 등록
     g_funcCount = 0;
     for (const auto& entry : g_menuTable) {
-        // 실제 '메뉴 명령'이 되는 Item과 Separator만 등록
         if (entry.type == MenuType::Item || entry.type == MenuType::Separator) {
-
-            // 안전 장치: 메뉴 아이템인데 실행 함수가 없는 경우는 제외 (Separator 제외)
-            if (entry.type == MenuType::Item && entry.pFunc == nullptr) continue;
+            if (entry.type == MenuType::Item && (entry.pFunc == nullptr || entry.eng == nullptr)) continue;
 
             if (entry.type == MenuType::Separator) {
                 funcItem[g_funcCount]._itemName[0] = _T('\0');
-                funcItem[g_funcCount]._pFunc = NULL;
+                funcItem[g_funcCount]._pFunc = nullptr;
             }
             else {
-                _tcscpy_s(funcItem[g_funcCount]._itemName, _countof(funcItem[g_funcCount]._itemName), entry.eng);
+                ::_tcscpy_s(funcItem[g_funcCount]._itemName, _countof(funcItem[g_funcCount]._itemName), entry.eng);
                 funcItem[g_funcCount]._pFunc = entry.pFunc;
             }
-
             funcItem[g_funcCount]._init2Check = false;
-            funcItem[g_funcCount]._pShKey = NULL;
+            funcItem[g_funcCount]._pShKey = nullptr;
             g_funcCount++;
         }
     }
 }
 
-extern "C" __declspec(dllexport) const TCHAR* getName() {
-    return GetTr(g_menuTable[0].eng);
-}
-
-extern "C" __declspec(dllexport) FuncItem* getFuncsArray(int* nbF) {
-    *nbF = g_funcCount;
-    return funcItem;
-}
-
+extern "C" __declspec(dllexport) const TCHAR* getName() { return GetTr(g_menuTable[0].eng); }
+extern "C" __declspec(dllexport) FuncItem* getFuncsArray(int* const nbF) { *nbF = g_funcCount; return funcItem; }
 extern "C" __declspec(dllexport) BOOL isUnicode() { return TRUE; }
-
-extern "C" __declspec(dllexport) LRESULT messageProc(UINT Message, WPARAM wParam, LPARAM lParam) { return TRUE; }
+extern "C" __declspec(dllexport) LRESULT messageProc(UINT /*Message*/, WPARAM /*wParam*/, LPARAM /*lParam*/) { return TRUE; }
 
 // --- [4] 메뉴 재구성 및 상태 업데이트 (Win32 API 기반) ---
 
 void RestructureMenu() {
     DetectLanguage();
-    HMENU hPluginsMenu = (HMENU)::SendMessage(nppData._nppHandle, NPPM_GETMENUHANDLE, NPPPLUGINMENU, 0);
+    const HMENU hPluginsMenu = reinterpret_cast<HMENU>(::SendMessage(nppData._nppHandle, NPPM_GETMENUHANDLE, NPPPLUGINMENU, 0));
     if (!hPluginsMenu) return;
 
     int pos = -1;
-    int count = GetMenuItemCount(hPluginsMenu);
+    const int count = ::GetMenuItemCount(hPluginsMenu);
     TCHAR buf[256];
-    for (int i = 0; i < count; i++) {
-        GetMenuString(hPluginsMenu, i, buf, 255, MF_BYPOSITION);
-        if (_tcscmp(buf, g_menuTable[0].eng) == 0 || (g_menuTable[0].kor && _tcscmp(buf, g_menuTable[0].kor) == 0)) {
+    for (int i = 0; i < count; ++i) {
+        ::GetMenuStringW(hPluginsMenu, i, buf, 255, MF_BYPOSITION);
+        if (::_tcscmp(buf, g_menuTable[0].eng) == 0 || (g_menuTable[0].kor && ::_tcscmp(buf, g_menuTable[0].kor) == 0)) {
             pos = i; break;
         }
     }
     if (pos == -1) return;
 
-    // 간판 업데이트
-    ::ModifyMenu(hPluginsMenu, pos, MF_BYPOSITION | MF_POPUP, (UINT_PTR)GetSubMenu(hPluginsMenu, pos), getName());
-    HMENU hMyMenu = GetSubMenu(hPluginsMenu, pos);
+    ::ModifyMenuW(hPluginsMenu, pos, MF_BYPOSITION | MF_POPUP, reinterpret_cast<UINT_PTR>(::GetSubMenu(hPluginsMenu, pos)), getName());
+    const HMENU hMyMenu = ::GetSubMenu(hPluginsMenu, pos);
     if (!hMyMenu) return;
 
-    // 아이템 이름 업데이트
-    for (int i = 0; i < g_funcCount; i++) {
-        if (funcItem[i]._pFunc != nullptr) {
-            ::ModifyMenu(hMyMenu, funcItem[i]._cmdID, MF_BYCOMMAND | MF_STRING, funcItem[i]._cmdID, GetTr(funcItem[i]._itemName));
-        }
+    while (::GetMenuItemCount(hMyMenu) > 0) {
+        ::DeleteMenu(hMyMenu, 0, MF_BYPOSITION);
     }
 
-    // 서브 메뉴 재구성
-    int funcIdxCounter = 0;
-    int topLevelItemPos = 0;
-    bool isInsideSubGroup = false;
+    // 메뉴 트리 구조 복원을 위한 동적 제어 스택
+    std::vector<HMENU> menuStack;
+    menuStack.push_back(hMyMenu);
 
-    for (int i = 1; i < (int)_countof(g_menuTable); i++) {
+    g_subMenuPositions.clear();
+    int funcIdx = 0;
+
+    for (int i = 1; i < (int)_countof(g_menuTable); ++i) {
         const auto& entry = g_menuTable[i];
+
+        // Separator, SubEnd, 혹은 새로운 SubHeader를 만나면 현재의 하위 서브메뉴 그룹을 강제로 닫고 루트로 복귀
+        if (entry.type == MenuType::Separator || entry.type == MenuType::SubEnd || entry.type == MenuType::SubHeader) {
+            if (menuStack.size() > 1) {
+                menuStack.pop_back();
+            }
+        }
+
+        HMENU hCurrentMenu = menuStack.back();
+
         if (entry.type == MenuType::SubHeader) {
-            int startIdx = funcIdxCounter;
-            int memberCount = 0;
-            for (int j = i + 1; j < (int)_countof(g_menuTable); j++) {
-                if (g_menuTable[j].type == MenuType::Item) memberCount++;
-                else break;
-            }
-            int endIdx = startIdx + memberCount - 1;
+            HMENU hSubMenu = ::CreatePopupMenu();
+            ::AppendMenuW(hCurrentMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(hSubMenu), GetTr(entry.eng));
+            menuStack.push_back(hSubMenu);
 
-            bool isFound = false;
-            int currentSubCount = GetMenuItemCount(hMyMenu);
-            for (int k = 0; k < currentSubCount; k++) {
-                GetMenuString(hMyMenu, k, buf, 255, MF_BYPOSITION);
-                if (_tcscmp(buf, entry.eng) == 0 || (entry.kor && _tcscmp(buf, entry.kor) == 0)) {
-                    ::ModifyMenu(hMyMenu, k, MF_BYPOSITION | MF_POPUP, (UINT_PTR)GetSubMenu(hMyMenu, k), GetTr(entry.eng));
-                    isFound = true; break;
-                }
+            // 최상위 플러그인 직속 서브메뉴 그룹의 현재 마크 위치 자동 추적 (UpdateMenuState 상시 연동)
+            if (entry.eng && menuStack.size() == 2) {
+                g_subMenuPositions[entry.eng] = ::GetMenuItemCount(hMyMenu) - 1;
             }
-
-            if (!isFound) {
-                HMENU hNewSubMenu = CreatePopupMenu();
-                for (int m = startIdx; m <= endIdx; m++) {
-                    if (m >= 0 && m < g_funcCount) {
-                        int id = funcItem[m]._cmdID;
-                        GetMenuString(hMyMenu, id, buf, 255, MF_BYCOMMAND);
-                        AppendMenu(hNewSubMenu, MF_STRING, id, buf);
-                        DeleteMenu(hMyMenu, id, MF_BYCOMMAND);
-                    }
-                }
-                InsertMenu(hMyMenu, topLevelItemPos, MF_BYPOSITION | MF_POPUP, (UINT_PTR)hNewSubMenu, GetTr(entry.eng));
-            }
-            if (entry.pPosOut) *(entry.pPosOut) = topLevelItemPos;
-            topLevelItemPos++;
-            isInsideSubGroup = true;
         }
         else if (entry.type == MenuType::Separator) {
-            if (!isInsideSubGroup) topLevelItemPos++;
-            funcIdxCounter++;
-            isInsideSubGroup = false;
+            if (funcIdx < g_funcCount) {
+                ::AppendMenuW(hCurrentMenu, MF_SEPARATOR, 0, nullptr);
+                funcIdx++;
+            }
         }
         else if (entry.type == MenuType::Item) {
-            if (!isInsideSubGroup) topLevelItemPos++;
-            funcIdxCounter++;
+            if (funcIdx < g_funcCount) {
+                if (entry.pFunc == nullptr || entry.eng == nullptr) continue;
+
+                const int id = funcItem[funcIdx]._cmdID;
+                ::AppendMenuW(hCurrentMenu, MF_STRING, id, GetTr(entry.eng));
+                funcIdx++;
+            }
         }
     }
 }
 
 void UpdateMenuState() {
-    const int whichView = (int)::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, 0);
+    const int whichView = static_cast<int>(::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, 0));
     const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
     if (!hSci) return;
 
     int langType = 0;
-    ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, (LPARAM)&langType);
-
-    // 1. Notepad++가 인지하는 인코딩 형식 확인용 (0: ANSI)
+    ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, reinterpret_cast<LPARAM>(&langType));
     int nppEncoding = 0;
-    ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
-
-    // 2. Scintilla가 사용하는 실제 코드페이지 확인용 (949: Korean ANSI)
-    const int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+    ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, reinterpret_cast<LPARAM>(&nppEncoding));
+    const int cp = static_cast<int>(::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0));
 
     const Sci_Position len = ::SendMessage(hSci, SCI_GETLENGTH, 0, 0);
-    const Sci_Position selStart = (Sci_Position)::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0);
-    const Sci_Position selEnd = (Sci_Position)::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0);
+    const Sci_Position selStart = static_cast<Sci_Position>(::SendMessage(hSci, SCI_GETSELECTIONSTART, 0, 0));
+    const Sci_Position selEnd = static_cast<Sci_Position>(::SendMessage(hSci, SCI_GETSELECTIONEND, 0, 0));
     const bool hasSelection = (selStart != selEnd);
-    const Sci_Position startLine = (Sci_Position)::SendMessage(hSci, SCI_LINEFROMPOSITION, selStart, 0);
-    const Sci_Position endLine = (Sci_Position)::SendMessage(hSci, SCI_LINEFROMPOSITION, selEnd, 0);
+    const Sci_Position startLine = static_cast<Sci_Position>(::SendMessage(hSci, SCI_LINEFROMPOSITION, selStart, 0));
+    const Sci_Position endLine = static_cast<Sci_Position>(::SendMessage(hSci, SCI_LINEFROMPOSITION, selEnd, 0));
     const bool isMultiLine = hasSelection && (endLine > startLine);
 
-    // SC_SEL_RECTANGLE: 기본 컬럼 블록, SC_SEL_THIN: Alt+Shift 조합으로 만든 폭이 없는 컬럼 블록
-    const int selMode = (int)::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0);
+    const int selMode = static_cast<int>(::SendMessage(hSci, SCI_GETSELECTIONMODE, 0, 0));
     const bool isColumnSelection = (selMode == SC_SEL_RECTANGLE || selMode == SC_SEL_THIN);
 
-    const HMENU hPluginsMenu = (HMENU)::SendMessage(nppData._nppHandle, NPPM_GETMENUHANDLE, NPPPLUGINMENU, 0);
+    const HMENU hPluginsMenu = reinterpret_cast<HMENU>(::SendMessage(nppData._nppHandle, NPPM_GETMENUHANDLE, NPPPLUGINMENU, 0));
     if (!hPluginsMenu) return;
 
     int myPos = -1;
-    const int count = GetMenuItemCount(hPluginsMenu);
+    const int count = ::GetMenuItemCount(hPluginsMenu);
     TCHAR buf[256];
-    for (int i = 0; i < count; i++) {
-        GetMenuString(hPluginsMenu, i, buf, 255, MF_BYPOSITION);
-        if (_tcscmp(buf, getName()) == 0) { myPos = i; break; }
+    for (int i = 0; i < count; ++i) {
+        ::GetMenuStringW(hPluginsMenu, i, buf, 255, MF_BYPOSITION);
+        if (::_tcscmp(buf, getName()) == 0) { myPos = i; break; }
     }
     if (myPos == -1) return;
-    const HMENU hMyMenu = GetSubMenu(hPluginsMenu, myPos);
+    const HMENU hMyMenu = ::GetSubMenu(hPluginsMenu, myPos);
 
-    auto setItem = [&](int idx, bool en) {
-        ::EnableMenuItem(hMyMenu, funcItem[idx]._cmdID, MF_BYCOMMAND | (en ? MF_ENABLED : MF_GRAYED));
+    // 일반 기능 매칭용 람다
+    const auto setItem = [&](const PFUNCPLUGINCMD pTargetFunc, const bool en) noexcept {
+        for (int i = 0; i < g_funcCount; ++i) {
+            if (funcItem[i]._pFunc == pTargetFunc) {
+                ::EnableMenuItem(hMyMenu, funcItem[i]._cmdID, MF_BYCOMMAND | (en ? MF_ENABLED : MF_GRAYED));
+                return;
+            }
+        }
         };
 
-    setItem(0, isMultiLine);    // 좌우 정렬
-    setItem(2, hasSelection && !isColumnSelection);   // 수식 계산
-    setItem(3, hasSelection);   // 한자->한글
-    setItem(4, hasSelection);   // 한글 풀어쓰기
-    setItem(5, hasSelection);   // 유니코드 한글 조합<->풀어쓰기
-    setItem(6, (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0)); // 조합형->완성형 (문서 전체)
-    setItem(7, hasSelection && !isColumnSelection);   // JS 표현식 평가
-    setItem(8, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));    // HTML/XML 태그 삭제
-    setItem(9, hasSelection && (langType != L_TEXT));   // 주석 삭제 (HTML/C++/Py)
-    setItem(11, true);  // About
+    // 서브메뉴 활성/비활성 제어용 위치값 조회도 동적 람다로 한 방에 해결
+    const auto getSubMenuPos = [](const TCHAR* const engName) noexcept -> int {
+        if (!engName) return -1;
+        const auto it = g_subMenuPositions.find(engName);
+        return (it != g_subMenuPositions.end()) ? it->second : -1;
+        };
 
-    if (g_posTextTrans != -1) {
+    setItem(DoAlignDlg, isMultiLine);
+    setItem(DoCalculate, hasSelection && !isColumnSelection);
+    setItem(DoInjectRegexPresets, true);
+    setItem(DoHanjaToHangul, hasSelection);
+    setItem(DoHangulDecomp, hasSelection);
+    setItem(DoToggleComposition, hasSelection);
+    setItem(DoKssmToWansung, (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0));
+    setItem(DoEvalJS, hasSelection && !isColumnSelection);
+    setItem(DoRemoveTags, hasSelection && (langType == L_TEXT || langType == L_HTML || langType == L_XML));
+    setItem(DoRemoveComments, hasSelection && (langType != L_TEXT));
+    setItem(DoAboutDlg, true);
+
+    const int posTextTrans = getSubMenuPos(_T("Text &Transliteration"));
+    if (posTextTrans != -1) {
         const bool canKssm = (nppEncoding == 0 && (cp == 0 || cp == 949) && len > 0);
         const bool isParentEnabled = hasSelection || canKssm;
-        ::EnableMenuItem(hMyMenu, g_posTextTrans, MF_BYPOSITION | (isParentEnabled ? MF_ENABLED : MF_GRAYED));
+        ::EnableMenuItem(hMyMenu, posTextTrans, MF_BYPOSITION | (isParentEnabled ? MF_ENABLED : MF_GRAYED));
     }
-    if (g_posWebTools != -1)  ::EnableMenuItem(hMyMenu, g_posWebTools, MF_BYPOSITION | (hasSelection ? MF_ENABLED : MF_GRAYED));
+
+    const int posWebTools = getSubMenuPos(_T("&Web Tools"));
+    if (posWebTools != -1) {
+        ::EnableMenuItem(hMyMenu, posWebTools, MF_BYPOSITION | (hasSelection ? MF_ENABLED : MF_GRAYED));
+    }
 }
 
 extern "C" __declspec(dllexport) void beNotified(SCNotification* notifyCode) {
     switch (notifyCode->nmhdr.code) {
     case NPPN_READY:
         DetectLanguage();
-        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, (LPARAM)&g_cachedLangType);
+        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, reinterpret_cast<LPARAM>(&g_cachedLangType));
         RestructureMenu();
         UpdateMenuState();
         break;
@@ -357,7 +367,7 @@ extern "C" __declspec(dllexport) void beNotified(SCNotification* notifyCode) {
         DetectLanguage(); RestructureMenu(); UpdateMenuState(); break;
     case NPPN_BUFFERACTIVATED:
     case NPPN_LANGCHANGED:
-        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, (LPARAM)&g_cachedLangType);
+        ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTLANGTYPE, 0, reinterpret_cast<LPARAM>(&g_cachedLangType));
         UpdateMenuState(); break;
     case SCN_UPDATEUI:
         UpdateMenuState(); break;
@@ -372,70 +382,69 @@ INT_PTR CALLBACK AboutDlgProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPa
     case WM_INITDIALOG:
     {
         // 1. Ctrl+Alt 조합 시 IDC_STATIC_DEBUG에 디버그 정보 출력
-        bool isCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
-        bool isAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+        const bool isCtrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool isAlt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
 
         // 2. 번역 적용
-        SetDlgItemText(hwnd, IDOK, GetTr(_T("OK")));
-        SetDlgItemText(hwnd, IDCANCEL, GetTr(_T("Cancel")));
+        ::SetDlgItemTextW(hwnd, IDOK, GetTr(_T("OK")));
+        ::SetDlgItemTextW(hwnd, IDCANCEL, GetTr(_T("Cancel")));
 
         // 3. 부모 창(Notepad++)과 내 창(About)의 좌표 정보를 가져옴
-        HWND hwndParent = GetParent(hwnd);
+        const HWND hwndParent = ::GetParent(hwnd);
         if (hwndParent) {
-            RECT rcParent, rcWindow;
-            GetWindowRect(hwndParent, &rcParent);
-            GetWindowRect(hwnd, &rcWindow);
+            RECT rcParent{}, rcWindow{};
+            ::GetWindowRect(hwndParent, &rcParent);
+            ::GetWindowRect(hwnd, &rcWindow);
 
-            int parentWidth = rcParent.right - rcParent.left;
-            int parentHeight = rcParent.bottom - rcParent.top;
-            int windowWidth = rcWindow.right - rcWindow.left;
-            int windowHeight = rcWindow.bottom - rcWindow.top;
+            const int parentWidth = rcParent.right - rcParent.left;
+            const int parentHeight = rcParent.bottom - rcParent.top;
+            const int windowWidth = rcWindow.right - rcWindow.left;
+            const int windowHeight = rcWindow.bottom - rcWindow.top;
 
             // 2. 부모 창의 정중앙 좌표를 계산함
-            int x = rcParent.left + (parentWidth - windowWidth) / 2;
-            int y = rcParent.top + (parentHeight - windowHeight) / 2;
+            const int x = rcParent.left + (parentWidth - windowWidth) / 2;
+            const int y = rcParent.top + (parentHeight - windowHeight) / 2;
 
             // 3. 계산된 위치로 다이얼로그를 이동시킴
-            SetWindowPos(hwnd, NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            ::SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
         }
 
         if (isCtrl && isAlt) {
             int whichView = 0;
-            ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, (LPARAM)&whichView);
-            HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
+            ::SendMessage(nppData._nppHandle, NPPM_GETCURRENTVIEW, 0, reinterpret_cast<LPARAM>(&whichView));
+            const HWND hSci = (whichView == 0) ? nppData._scintillaMainHandle : nppData._scintillaSecondHandle;
 
-            int cp = (int)::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0);
+            const int cp = static_cast<int>(::SendMessage(hSci, SCI_GETCODEPAGE, 0, 0));
             int nppEncoding = 0;
-            ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, (LPARAM)&nppEncoding);
+            ::SendMessage(nppData._nppHandle, NPPM_GETBUFFERENCODING, 0, reinterpret_cast<LPARAM>(&nppEncoding));
 
             TCHAR szDebug[128];
-            _stprintf_s(szDebug, _countof(szDebug), _T("Debug: CP[%d] / NPP_ENC[%d] / View[%d]"), cp, nppEncoding, whichView);
-            SetDlgItemText(hwnd, IDC_STATIC_DEBUG, szDebug);
+            ::_stprintf_s(szDebug, _countof(szDebug), _T("Debug: CP[%d] / NPP_ENC[%d] / View[%d]"), cp, nppEncoding, whichView);
+            ::SetDlgItemTextW(hwnd, IDC_STATIC_DEBUG, szDebug);
         }
         else {
-            SetDlgItemText(hwnd, IDC_STATIC_DEBUG, _T(""));
+            ::SetDlgItemTextW(hwnd, IDC_STATIC_DEBUG, _T(""));
         }
 
-        return (INT_PTR)TRUE;
+        return static_cast<INT_PTR>(TRUE);
     }
 
     case WM_COMMAND:
-        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+    {
+        const WORD wpLow = LOWORD(wParam);
+        if (wpLow == IDOK || wpLow == IDCANCEL)
         {
-            EndDialog(hwnd, LOWORD(wParam));
-            return (INT_PTR)TRUE;
+            ::EndDialog(hwnd, wpLow);
+            return static_cast<INT_PTR>(TRUE);
         }
         break;
     }
-    return (INT_PTR)FALSE;
+    }
+    return static_cast<INT_PTR>(FALSE);
 }
 
 // 메뉴에서 'About'을 클릭했을 때 호출되는 함수
 void DoAboutDlg()
 {
-    // g_hInst: dllmain에서 저장한 인스턴스 핸들
-    // IDD_DIALOG_ABOUT: resource.h에 정의된 다이얼로그 ID
-    // nppData._nppHandle: Notepad++ 메인 윈도우 핸들 (Parent)
-    DialogBox(g_hInst, MAKEINTRESOURCE(IDD_DIALOG_ABOUT), nppData._nppHandle, AboutDlgProc);
+    ::DialogBoxParamW(g_hInst, MAKEINTRESOURCE(IDD_DIALOG_ABOUT), nppData._nppHandle, AboutDlgProc, 0);
 }
-

@@ -383,7 +383,7 @@ void ExecuteAlignLines(const int nMode) {
                 // StrTrim(var->wchLineBuf, L"\r\n\t "); 구현
                 {
                     LPWSTR pBuf = var->wchLineBuf;
-                    // 1. 뒤쪽 공백 제거 (먼저 해야 계산이 편합니다)
+                    // 1. 뒤쪽 공백 제거 (먼저 해야 계산이 편함)
                     size_t len = wcslen(pBuf);
                     while (len > 0 && wcschr(L"\r\n\t ", pBuf[len - 1])) {
                         pBuf[--len] = L'\0';

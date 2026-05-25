@@ -39,7 +39,7 @@ namespace {
     std::wstring g_savedWindowTitle;
     bool g_isHistorySaved = false;
 
-    // 💡 찾기 창의 메시지를 감시하다가 닫히는 순간 히스토리를 복원하는 콜백 함수
+    // 찾기 창의 메시지를 감시하다가 닫히는 순간 히스토리를 복원하는 콜백 함수
     LRESULT CALLBACK FindDlgSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR /*dwRefData*/)
     {
         // WM_SHOWWINDOW에서 wParam이 FALSE이면 창이 숨겨지는(사용자가 닫는) 순간임
@@ -131,7 +131,7 @@ void DoInjectRegexPresets()
 
         g_isHistorySaved = true;
 
-        // 💡 찾기 창에 감시카메라를 달아 창이 닫힐 때 위의 복원 함수가 실행되도록 묶어줌
+        // 찾기 창에 감시카메라를 달아 창이 닫힐 때 위의 복원 함수가 실행되도록 묶어줌
         ::SetWindowSubclass(hFindDlg, FindDlgSubclassProc, SUBCLASS_ID_FIND_DLG, 0);
     }
 
